@@ -1,6 +1,12 @@
-# TF2 Metal Trader v0.9.124
+# TF2 Metal Trader v0.9.125
 
 Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam trade offers.
+
+## v0.9.125 — the trader metal check combines refined, reclaimed and scrap
+
+- The price is now covered by all three denominations together. 1.77 ref (16 scrap) is met by 1 refined + 2 reclaimed + 1 scrap; the trader does not need enough of any single kind.
+- Pass 1 stages whole items that fit the remaining price, largest first (refined, then reclaimed, then scrap). Pass 2 tops up any gap with the smallest whole item that closes it (reclaimed, then refined), for example when the trader has no scrap.
+- A problem with one denomination (a Steam hiccup, nothing found) no longer ends the check: what was staged is kept and the other denominations are still tried. The check only fails if the combined total is still short.
 
 ## v0.9.124 — key prices are paid with physical keys only when the payer has enough
 

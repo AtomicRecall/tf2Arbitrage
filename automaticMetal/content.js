@@ -1043,16 +1043,40 @@
         }
       }
 
-      let countedScrap = 0;
-      for (const [kind, imageUrl, valueScrap] of badTrader ? [] : denominations) {
-        if (remaining <= 0) break;
-        const requested = Math.ceil(remaining / valueScrap);
+      // The price is met by refined, reclaimed and scrap TOGETHER (1.77 ref =
+      // 16 scrap can be 1 refined + 2 reclaimed + 1 scrap). Whatever the trader
+      // has of one denomination is kept and the rest of the price is asked of
+      // the next one, so one missing or short denomination never ends the check.
+      const stagedScrap = () => metalCountsToScrap(readStagedMetal());
+      const tryDenomination = async (kind, imageUrl, requested) => {
+        if (requested <= 0) return;
         statusCallback?.(`Testing whether trader can add ${requested} ${kind} metal…`);
-        const added = await addMetalTypeToSide("their", imageUrl, requested, kind);
-        // Count everything now in the trade, not just this step's result, so
-        // the next (lower) denomination only covers what is still missing.
-        countedScrap += added * valueScrap;
-        remaining = targetScrap - Math.max(countedScrap, metalCountsToScrap(readStagedMetal()));
+        try {
+          await addMetalTypeToSide("their", imageUrl, requested, kind);
+        } catch (error) {
+          // Keep what was staged and try the other denominations; the error
+          // only matters if the combined total still falls short.
+          addError = addError || error;
+          console.warn(`TF2 Metal Trader: could not finish adding ${kind} metal; continuing with the others.`, error);
+        }
+        remaining = targetScrap - stagedScrap();
+      };
+
+      if (!badTrader) {
+        // Pass 1 - exact fit, largest first: only whole denominations that fit
+        // inside what is still needed, so nothing is over-staged.
+        for (const [kind, imageUrl, valueScrap] of denominations) {
+          if (remaining <= 0) break;
+          await tryDenomination(kind, imageUrl, Math.floor(remaining / valueScrap));
+        }
+        // Pass 2 - top up: if the exact fit left a gap (for example the trader
+        // has no scrap), cover it with the smallest whole item that closes it,
+        // taking whatever the trader still has.
+        // (Scrap was already asked for in full in pass 1, so it is not retried.)
+        for (const [kind, imageUrl, valueScrap] of denominations.slice(0, 2).reverse()) {
+          if (remaining <= 0) break;
+          await tryDenomination(kind, imageUrl, Math.ceil(remaining / valueScrap));
+        }
       }
       Object.assign(counts, readStagedMetal());
     } catch (error) {
