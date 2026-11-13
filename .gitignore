@@ -1,1 +1,6 @@
 .env.local
+macConfirmer/server_config.json
+__pycache__/
+.DS_Store
+*.xpi
+TF2 Trader.app/

@@ -13,6 +13,9 @@ Workflow:
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
 
+V0.7.104 changes:
+- Logins and settings survive browser restarts. cookie-keeper.js (new, needs the cookies permission) turns the session cookies of steamcommunity.com, steampowered.com, stntrading.eu and backpack.tf into 30-day cookies, because Firefox drops session cookies on quit. Logging out on a site is not undone. A checkbox in the popup/sidebar switches it off. The Steam Web API key and other add-on settings were already stored persistently in the profile. browserShell/profile/user.js now also states that nothing is cleared on exit.
+
 V0.7.103 changes:
 - The analyzer can live in Firefox's sidebar (sidebar_action, same page as the popup opened as popup.html?mode=sidebar) so it stays visible while browsing. It has its own add-on ID (tf2-arbitrage@example.local) so it can be preinstalled by browserShell/launch.py, which also starts the Mac confirm server and opens the STN hats page. Shortcut: Alt+Shift+T toggles the sidebar. Because the add-on ID is new, settings saved by an earlier install (Steam Web API key, key rate, Mac confirmer) must be entered again.
 - Sent bot offers waiting for Steam Mobile confirmation (state 9) can be accepted automatically by the Mac confirmer (macConfirmer/confirm_server.py), configured in the popup/sidebar.

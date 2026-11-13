@@ -27,6 +27,19 @@ user_pref("sidebar.revamp", false);
 user_pref("sidebar.verticalTabs", false);
 user_pref("sidebar.position_start", true);
 
+// ---- Logins and saved settings survive restarts ----------------------------
+// Nothing is cleared on exit. (Session-only login cookies are made persistent
+// by the add-on's cookie keeper, since Firefox drops them on quit.)
+user_pref("network.cookie.lifetimePolicy", 0);
+user_pref("privacy.sanitize.sanitizeOnShutdown", false);
+user_pref("privacy.clearOnShutdown.cookies", false);
+user_pref("privacy.clearOnShutdown.cache", false);
+user_pref("privacy.clearOnShutdown.sessions", false);
+user_pref("privacy.clearOnShutdown.offlineApps", false);
+user_pref("privacy.clearOnShutdown_v2.cookiesAndStorage", false);
+user_pref("privacy.clearOnShutdown_v2.cache", false);
+user_pref("signon.rememberSignons", true);
+
 // ---- Quieter browser: no background noise during a long-running bot --------
 user_pref("datareporting.healthreport.uploadEnabled", false);
 user_pref("datareporting.policy.dataSubmissionEnabled", false);

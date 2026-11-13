@@ -1,12 +1,13 @@
 ﻿{
   "manifest_version": 2,
   "name": "TF2 Trade Arbitrage Prototype",
-  "version": "0.7.103",
+  "version": "0.7.104",
   "description": "Finds profitable TF2 buy orders, verifies Steam offer states via the Web API, tracks traders, and can execute queued arbitrage trades.",
   "permissions": [
     "tabs",
     "notifications",
     "storage",
+    "cookies",
     "https://api.steampowered.com/*",
     "https://backpack.tf/*",
     "https://*.backpack.tf/*",
@@ -20,6 +21,7 @@
   "background": {
     "scripts": [
       "blacklist.js",
+      "cookie-keeper.js",
       "background.js"
     ],
     "persistent": true
@@ -37,7 +39,7 @@
     }
   ],
   "browser_action": {
-    "default_title": "TF2 Trade Analyzer v0.7.103",
+    "default_title": "TF2 Trade Analyzer v0.7.104",
     "default_popup": "popup.html"
   },
   "sidebar_action": {

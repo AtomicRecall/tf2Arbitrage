@@ -34,6 +34,10 @@
     <button id="clearSteamApiKey" class="secondary" type="button">Remove saved key</button>
     <div id="steamApiKeyStatus" class="api-key-status" role="status" aria-live="polite">Checking saved key…</div>
   </details>
+  <label class="automation-toggle">
+    <input id="keepLogins" type="checkbox" checked>
+    <span>Stay signed in after restarting the browser (keeps the login cookies of Steam, STN and backpack.tf for 30 days)</span>
+  </label>
   <details id="macSettings" class="api-settings">
     <summary>Mac confirmer (accepts Steam mobile confirmations for bot offers)</summary>
     <p class="api-key-info">Address and token of the server running on your Mac (macConfirmer/confirm_server.py prints both when it starts). When enabled, a bot offer that Steam reports as waiting for confirmation is sent to the Mac, which accepts it in the Steam app through iPhone Mirroring. The token is stored in this extension's local storage only.</p>

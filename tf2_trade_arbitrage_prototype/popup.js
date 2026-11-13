@@ -423,6 +423,11 @@ clearSteamApiKey.onclick=async()=>{
   }
 };
 
+// ---- Stay signed in (cookie-keeper.js reads this setting) ----------------
+const keepLogins=$("keepLogins");
+api.storage.local.get({keepLogins:true},v=>{keepLogins.checked=v.keepLogins!==false});
+keepLogins.onchange=()=>{storageSetLocal({keepLogins:keepLogins.checked}).catch(()=>{})};
+
 // ---- Mac confirmer settings ---------------------------------------------
 const macUrl=$("macUrl"),macToken=$("macToken"),macEnabled=$("macEnabled"),saveMac=$("saveMac"),testMac=$("testMac"),macStatus=$("macStatus"),macSettings=$("macSettings");
 let macTokenSaved=false;
