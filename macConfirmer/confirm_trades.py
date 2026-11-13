@@ -29,8 +29,8 @@ import sys
 import time
 
 # Pointer positions measured with `cliclick p`.
-TRADE_OFFER = (1271, 498)
-CONFIRM_BUTTON = (1274, 884)
+TRADE_OFFER = (1308, 578)
+CONFIRM_BUTTON = (1323, 928)
 
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
 # For example: open another tab in the Steam app, then come back to Confirmations.
@@ -43,8 +43,8 @@ REFRESH_TAPS = []
 REFRESH_Y_OFFSET = 0
 
 # Mouse-wheel refresh: this many wheel events of this many lines each.
-WHEEL_EVENTS = 28
-WHEEL_LINES = 6
+WHEEL_EVENTS = 50
+WHEEL_LINES = 7
 
 # iPhone Mirroring lags, so a single click is sometimes not registered. Every
 # click is sent twice, this many milliseconds apart (0 = a single click).
