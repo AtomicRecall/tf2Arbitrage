@@ -1077,7 +1077,7 @@ async function requestMacConfirmations(entries=[...trackedBotOffers.values()]){
         for(const entry of group){entry.macRequestedAt=Date.now();entry.macRequests=(entry.macRequests||0)+1;entry.macErrors=0}
         emitTradeAutomationStatus(payload?.duplicate
           ?`The Mac already has offer${ids.length===1?"":"s"} ${ids.map(id=>`#${id}`).join(", ")} queued.`
-          :`Asked the Mac to confirm ${ids.length} offer${ids.length===1?"":"s"} (${ids.map(id=>`#${id}`).join(", ")})${retry?" again":""}.`);
+          :`Asked the Mac to confirm ${ids.length} offer${ids.length===1?"":"s"} (${ids.map(id=>`#${id}`).join(", ")})${retry?" again":""}.${payload?.dryRun?" The Mac server is in DRY RUN mode, so nothing will be clicked; start the browser without --server-dry-run.":""}`);
         continue;
       }
       throw new Error(payload?.error||`the Mac server answered HTTP ${status}`);

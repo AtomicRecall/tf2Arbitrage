@@ -131,7 +131,7 @@ class Confirmer:
             self.queue.append((count, fresh))
             self.cond.notify()
             log(f"Queued {count} confirmation{'s' if count != 1 else ''} {fresh or ''}".rstrip())
-            return 202, {"ok": True, "queued": count, "queueLength": len(self.queue)}
+            return 202, {"ok": True, "queued": count, "queueLength": len(self.queue), "dryRun": self.dry_run}
 
     def resume(self):
         with self.cond:
@@ -189,7 +189,7 @@ class Confirmer:
                     self.done_ids.update(ids)
                     self.confirmed_times.extend([time.time()] * count)
                     self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": True})
-                log(f"Done: {count} accepted.")
+                log(f"Done: {count} accepted." if not self.dry_run else f"Done (DRY RUN: nothing was actually clicked) for {count}.")
             except BaseException as error:  # a failed run must never be repeated blindly
                 reason = str(error) or error.__class__.__name__
                 with self.cond:
