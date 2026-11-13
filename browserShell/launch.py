@@ -157,12 +157,17 @@ def start_server(server_dry_run):
         print(f"Confirm server not found at {SERVER_SCRIPT}; continuing without it.")
         return None
     command = [sys.executable, str(SERVER_SCRIPT), "--host", SERVER_HOST, "--port", str(SERVER_PORT)]
+    # An app started from Finder has a bare PATH; give the server Homebrew's folders.
+    server_env = dict(os.environ)
+    server_env["PATH"] = os.pathsep.join([server_env.get("PATH", ""), "/opt/homebrew/bin", "/usr/local/bin"])
     if server_dry_run:
         command.append("--dry-run")
-    if not server_dry_run and platform.system() == "Darwin" and not shutil.which("cliclick"):
+    if not server_dry_run and platform.system() == "Darwin" and not (
+        shutil.which("cliclick", path=server_env["PATH"])
+    ):
         print("WARNING: cliclick is not installed (brew install cliclick); the server will start but cannot click.")
     print("Starting the confirm server" + (" (dry run: no clicks)" if server_dry_run else "") + "…")
-    process = subprocess.Popen(command, cwd=SERVER_SCRIPT.parent)
+    process = subprocess.Popen(command, cwd=SERVER_SCRIPT.parent, env=server_env)
     # Make sure it really came up before the browser relies on it.
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:

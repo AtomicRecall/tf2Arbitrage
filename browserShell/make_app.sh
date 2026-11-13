@@ -14,7 +14,7 @@ APP="$ROOT/TF2 Trader.app"
 LOG="$HOME/Library/Logs/TF2Trader.log"
 
 rm -rf "$APP"
-osacompile -o "$APP" -e "do shell script \"cd '$ROOT' && /usr/bin/python3 browserShell/launch.py >> '$LOG' 2>&1 &\""
+osacompile -o "$APP" -e "do shell script \"export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; cd '$ROOT' && /usr/bin/python3 browserShell/launch.py >> '$LOG' 2>&1 &\""
 echo "Created: $APP"
 echo "Log: $LOG"
 echo "Grant Accessibility and Input Monitoring to this app (and to Terminal if the"

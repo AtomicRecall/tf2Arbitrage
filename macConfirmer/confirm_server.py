@@ -33,6 +33,7 @@ import ipaddress
 import json
 import random
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -64,6 +65,22 @@ def load_token():
 
 def log(message):
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+def preflight(dry_run):
+    """Checks, at start-up, the things that make clicks silently do nothing."""
+    if dry_run:
+        return
+    program = confirm_trades.find_cliclick()
+    if not program:
+        log("WARNING: cliclick was not found, so nothing can be clicked. Install it: brew install cliclick")
+        return
+    result = subprocess.run([program, "p"], capture_output=True, text=True)
+    if result.returncode != 0:
+        log(f"WARNING: cliclick could not read the pointer ({result.stderr.strip() or result.stdout.strip()}).")
+        return
+    log(f"cliclick found at {program}. If clicks or scrolling do nothing, give the app that started this "
+        f"server (Terminal, or TF2 Trader) Accessibility and Input Monitoring in System Settings > Privacy & Security.")
 
 
 class Confirmer:
@@ -274,6 +291,7 @@ def main():
     confirm_trades.WHEEL_LINES = args.wheel_lines
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
 
+    preflight(args.dry_run)
     token = load_token()
     allowed = {ipaddress.ip_address(item) for item in args.allow}
     confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour)

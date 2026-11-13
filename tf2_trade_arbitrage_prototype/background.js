@@ -999,6 +999,7 @@ const MAC_CONFIRM_MAX_REQUESTS=3;
 const MAC_CONFIRM_ERROR_BACKOFF_MS=30000;
 const MAC_CONFIRM_MAX_ERRORS=5;
 const MAC_CONFIRM_POLL_MS=5000;
+let macConfirmerReportedPause="";
 
 async function loadMacConfirmerSettings(){
   const stored=isFirefoxBrowserApi
@@ -1045,6 +1046,19 @@ async function requestMacConfirmations(entries=[...trackedBotOffers.values()]){
   try{settings=await loadMacConfirmerSettings()}
   catch(error){console.warn("Could not read the Mac confirmer settings:",error);return}
   if(!settings.enabled)return;
+
+  // The Mac works on a request after answering it, so a failed click run only
+  // shows up in its status. Say so, instead of leaving the offer silently waiting.
+  if(waiting.some(entry=>entry.macRequestedAt)){
+    try{
+      const {payload}=await macConfirmerFetch(settings,"/status");
+      const reason=payload?.paused||"";
+      if(reason&&reason!==macConfirmerReportedPause){
+        macConfirmerReportedPause=reason;
+        emitTradeAutomationStatus(`The Mac confirmer stopped without confirming: ${reason}. Check its output (the terminal or ~/Library/Logs/TF2Trader.log), fix it, then resume it (POST /resume) or restart the browser. Confirm on your phone meanwhile.`);
+      }else if(!reason)macConfirmerReportedPause="";
+    }catch(error){/* the request below reports connection problems */}
+  }
 
   const now=Date.now();
   const due=waiting.filter(entry=>{

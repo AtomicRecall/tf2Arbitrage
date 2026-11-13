@@ -15,6 +15,7 @@ Workflow:
 
 V0.7.106 changes:
 - The Mac confirmer is now also asked to confirm the STN purchase offer. Before, it was only asked for sent bot offers, so accepting the STN offer waited for a manual phone confirmation. It is asked as soon as the offer page says Steam needs the confirmation, or when the Web API reports state 9.
+- A failed click run on the Mac (for example cliclick missing or no permission) is now reported in the status line instead of leaving the offer silently waiting.
 - The scanner window no longer shows the sidebar in the TF2 Trader browser (browserShell/profile/chrome/userChrome.css).
 
 V0.7.105 changes:

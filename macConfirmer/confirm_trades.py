@@ -20,8 +20,10 @@ were measured (`cliclick p` prints the pointer position).
 """
 
 import argparse
+import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -53,12 +55,34 @@ REFRESH_DRAG_PIXELS = 350
 REFRESH_DRAG_STEPS = 14
 
 
+# Homebrew installs cliclick here. A server started from a double-clicked app
+# gets a bare PATH without these folders, so look in them explicitly.
+CLICLICK_FOLDERS = ["/opt/homebrew/bin", "/usr/local/bin"]
+
+
+def find_cliclick():
+    """Full path to cliclick, or None if it is not installed."""
+    found = shutil.which("cliclick")
+    if found:
+        return found
+    for folder in CLICLICK_FOLDERS:
+        candidate = os.path.join(folder, "cliclick")
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 class Clicker:
     def __init__(self, dry_run):
         self.dry_run = dry_run
 
     def _cliclick(self, *commands, wait_ms=0):
         args = ["cliclick"]
+        if not self.dry_run:
+            program = find_cliclick()
+            if not program:
+                raise RuntimeError("cliclick was not found (install it with: brew install cliclick). Nothing was clicked.")
+            args = [program]
         if wait_ms:
             args += ["-w", str(wait_ms)]
         args += list(commands)
