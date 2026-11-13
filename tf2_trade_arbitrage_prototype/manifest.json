@@ -1,0 +1,62 @@
+﻿{
+  "manifest_version": 2,
+  "name": "TF2 Trade Arbitrage Prototype",
+  "version": "0.7.103",
+  "description": "Finds profitable TF2 buy orders, verifies Steam offer states via the Web API, tracks traders, and can execute queued arbitrage trades.",
+  "permissions": [
+    "tabs",
+    "notifications",
+    "storage",
+    "https://api.steampowered.com/*",
+    "https://backpack.tf/*",
+    "https://*.backpack.tf/*",
+    "<all_urls>"
+  ],
+  "host_permissions": [
+    "https://api.steampowered.com/*",
+    "https://backpack.tf/*",
+    "https://*.backpack.tf/*"
+  ],
+  "background": {
+    "scripts": [
+      "blacklist.js",
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "blacklist.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_title": "TF2 Trade Analyzer v0.7.103",
+    "default_popup": "popup.html"
+  },
+  "sidebar_action": {
+    "default_title": "TF2 Trade Analyzer",
+    "default_panel": "popup.html?mode=sidebar",
+    "open_at_install": true
+  },
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Show or hide the TF2 Trade Analyzer sidebar"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tf2-arbitrage@example.local",
+      "strict_min_version": "109.0"
+    }
+  }
+}

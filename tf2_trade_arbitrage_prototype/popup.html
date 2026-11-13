@@ -1,0 +1,79 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TF2 Trade Analyzer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>TF2 Trade Analyzer <span id="version">v0.7.102</span></h1>
+  <div class="setting">
+    <label>1 key =</label>
+    <input id="keyRate" type="number" min="0" step="0.01" value="63">
+    <span>ref</span>
+  </div>
+  <div class="setting volume-setting">
+    <label>Sound</label>
+    <input id="volume" type="range" min="0" max="100" step="1" value="40">
+    <strong id="volumeValue">40%</strong>
+  </div>
+  <label class="automation-toggle">
+    <input id="autoTrades" type="checkbox">
+    <span>Automatically buy items and send bot offers</span>
+  </label>
+  <div id="tradeStatus" class="trade-status" role="status" aria-live="polite">Automatic trading is off. Enable it to execute future Good Trades.</div>
+  <details id="steamApiSettings" class="api-settings" open>
+    <summary>Steam Web API key (required for STN purchase checks)</summary>
+    <p class="api-key-info">The key is stored in this extension's local storage and used by its background script to query Steam directly. It is never sent to page scripts. Do not share it in chat. Mobile confirmation remains manual.</p>
+    <p class="api-key-info"><a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">Create or view your Steam Web API key</a></p>
+    <label for="steamApiKey">Steam Web API key</label>
+    <div class="api-key-controls">
+      <input id="steamApiKey" type="password" maxlength="32" autocomplete="off" spellcheck="false">
+      <button id="saveSteamApiKey" type="button">Save key</button>
+    </div>
+    <button id="clearSteamApiKey" class="secondary" type="button">Remove saved key</button>
+    <div id="steamApiKeyStatus" class="api-key-status" role="status" aria-live="polite">Checking saved key…</div>
+  </details>
+  <details id="macSettings" class="api-settings">
+    <summary>Mac confirmer (accepts Steam mobile confirmations for bot offers)</summary>
+    <p class="api-key-info">Address and token of the server running on your Mac (macConfirmer/confirm_server.py prints both when it starts). When enabled, a bot offer that Steam reports as waiting for confirmation is sent to the Mac, which accepts it in the Steam app through iPhone Mirroring. The token is stored in this extension's local storage only.</p>
+    <label for="macUrl">Mac server address</label>
+    <input id="macUrl" type="text" placeholder="http://127.0.0.1:8765 (same Mac) or http://192.168.1.50:8765" autocomplete="off" spellcheck="false">
+    <label for="macToken">Token</label>
+    <input id="macToken" type="password" autocomplete="off" spellcheck="false">
+    <label class="automation-toggle">
+      <input id="macEnabled" type="checkbox">
+      <span>Ask the Mac to confirm bot offers</span>
+    </label>
+    <div class="api-key-controls">
+      <button id="saveMac" type="button">Save</button>
+      <button id="testMac" class="secondary" type="button">Test connection</button>
+    </div>
+    <div id="macStatus" class="api-key-status" role="status" aria-live="polite">Not configured.</div>
+  </details>
+  <div class="hint">STN purchase completion is verified through the Steam Web API for the exact offer ID. Only trade_offer_state 3 (Accepted) counts as complete; state 9 (CreatedNeedsConfirmation) and state 11 (InEscrow) do not. Approve mobile confirmations yourself. Acceptance of outgoing bot offers is not tracked.</div>
+  <button id="scan">Scan current page</button>
+  <button id="stop" class="secondary">Stop</button>
+  <div class="hint">Progress is saved automatically when this popup closes. Dismissed items stay dismissed until restored.</div>
+  <div class="hint">Backpack.tf scan pages, Steam offer checks, STN purchases and the Steam offers that follow them open in a separate “TF2 Arbitrage Scanner” window that closes when everything is finished. Scanning pauses while a trade runs in it. Keep it open and visible (not minimized); your main window is left alone, except for the Backpack.tf pages that are highlighted for you.</div>
+  <div id="status">Open your TF2 marketplace page first.</div>
+  <div class="summary">
+    <div><b id="total">0</b><span>items</span></div>
+    <div><b id="checked">0</b><span>checked</span></div>
+    <div><b id="deals">0</b><span>deals</span></div>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Results filter">
+    <button class="tab active" data-filter="all" role="tab">All <span id="tabAll">0</span></button>
+    <button class="tab" data-filter="found" role="tab">Found <span id="tabFound">0</span></button>
+    <button class="tab" data-filter="deal" role="tab">Good Trades <span id="tabDeals">0</span></button>
+    <button class="tab" data-filter="unverified" role="tab">Unverified Trades <span id="tabUnverified">0</span></button>
+    <button class="tab" data-filter="notfound" role="tab">Not Found <span id="tabNotFound">0</span></button>
+    <button class="tab" data-filter="dismissed" role="tab">Dismissed <span id="tabDismissed">0</span></button>
+    <button class="tab" data-filter="traders" role="tab">Traders <span id="tabTraders">0</span></button>
+  </div>
+  <div id="results"></div>
+  <div id="unverifiedResults" hidden></div>
+  <div id="tradersView" hidden></div>
+  <script src="popup.js"></script>
+</body>
+</html>

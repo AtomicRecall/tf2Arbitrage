@@ -1,0 +1,27 @@
+/* Keeps the TF2 Trader sidebar permanently on screen.
+   Selectors target Firefox's classic sidebar (sidebar.revamp = false in user.js).
+   If a Firefox update changes the sidebar's structure, these may need updating. */
+
+/* No header row, so the title and the close (x) button are gone. */
+#sidebar-header {
+  display: none !important;
+}
+
+/* The sidebar keeps a usable width and cannot be collapsed to nothing. */
+#sidebar-box {
+  min-width: 340px !important;
+  max-width: 640px !important;
+}
+
+/* Hide the menu entries and shortcuts that would close or switch the sidebar. */
+#sidebar-button,
+#viewSidebarMenu,
+#menu_sidebar_close,
+menuitem[key="key_toggleSidebar"] {
+  display: none !important;
+}
+
+/* A little less browser chrome around the pages. */
+#PersonalToolbar {
+  display: none !important;
+}

@@ -1,0 +1,184 @@
+#tf2-metal-trader {
+  position: fixed;
+  top: 90px;
+  right: 24px;
+  width: 300px;
+  z-index: 2147483647;
+  box-sizing: border-box;
+
+  color: #e6e6e6;
+  background: #171a1d;
+  border: 1px solid #4b5158;
+  border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+}
+
+#tf2-metal-trader * {
+  box-sizing: border-box;
+}
+
+#tf2-metal-trader.tmt-hidden {
+  display: none;
+}
+
+.tmt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 10px;
+
+  background: #202428;
+  border-bottom: 1px solid #3b4147;
+}
+
+.tmt-title {
+  color: #f1f1f1;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tmt-subtitle {
+  margin-top: 2px;
+  color: #8f98a0;
+  font-size: 11px;
+}
+
+.tmt-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #9ba2a8;
+
+  font-size: 20px;
+  line-height: 26px;
+  cursor: pointer;
+}
+
+.tmt-close:hover {
+  background: #30363c;
+  color: #fff;
+}
+
+.tmt-body {
+  padding: 12px;
+}
+
+.tmt-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #b8bec5;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tmt-input-row {
+  display: flex;
+  gap: 7px;
+}
+
+.tmt-input {
+  min-width: 0;
+  flex: 1;
+
+  height: 36px;
+  padding: 0 9px;
+
+  border: 1px solid #59616a;
+  border-radius: 3px;
+  outline: none;
+
+  background: #101214;
+  color: #fff;
+  font-size: 14px;
+}
+
+.tmt-input:focus {
+  border-color: #67a7e8;
+}
+
+.tmt-add {
+  width: 72px;
+  height: 36px;
+
+  border: 1px solid #5b8bb7;
+  border-radius: 3px;
+
+  background: #315a7d;
+  color: #fff;
+  font-weight: 700;
+
+  cursor: pointer;
+}
+
+.tmt-add:hover:not(:disabled) {
+  background: #3d6d96;
+}
+
+.tmt-add:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.tmt-preview {
+  min-height: 18px;
+  margin-top: 9px;
+  color: #d6d9dc;
+  font-size: 12px;
+}
+
+.tmt-status {
+  min-height: 34px;
+  margin-top: 10px;
+  padding: 8px;
+
+  border: 1px solid #353a3f;
+  border-radius: 3px;
+
+  background: #111315;
+  color: #9ea5ac;
+  line-height: 16px;
+}
+
+.tmt-status.success {
+  border-color: #4f7d59;
+  color: #8fd39c;
+}
+
+.tmt-status.error {
+  border-color: #8a4d4d;
+  color: #ff9a9a;
+}
+.tmt-trade-controls {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.tmt-trade-button {
+  flex: 1;
+  height: 32px;
+  border: 1px solid #59616a;
+  border-radius: 3px;
+  background: #252a2f;
+  color: #e6e6e6;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tmt-trade-button:hover:not(:disabled) {
+  background: #343b42;
+}
+
+.tmt-trade-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}

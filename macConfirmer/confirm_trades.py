@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Accepts Steam mobile trade confirmations through iPhone Mirroring.
+
+Flow (all done with `cliclick` clicks inside the mirrored Steam app, which must
+already be open on its Confirmations screen):
+
+  1. Pull down to refresh the confirmations list (once, at the start).
+  2. Click the trade offer at the top of the list.
+  3. Click the confirm button.
+  4. Steam returns to the list and refreshes it by itself, pushing the next
+     trade to the top, so steps 2-3 simply repeat for the requested count.
+
+Usage:
+  python3 confirm_trades.py 3             # accept 3 trades
+  python3 confirm_trades.py 3 --dry-run   # print what would happen, click nothing
+
+Requirements: macOS, `brew install cliclick`, Accessibility permission for the
+terminal, iPhone Mirroring open and not moved or resized since the coordinates
+were measured (`cliclick p` prints the pointer position).
+"""
+
+import argparse
+import random
+import re
+import subprocess
+import sys
+import time
+
+# Pointer positions measured with `cliclick p`.
+TRADE_OFFER = (1271, 498)
+CONFIRM_BUTTON = (1274, 884)
+
+# Taps that reload the confirmations list instead of a swipe, clicked in order.
+# For example: open another tab in the Steam app, then come back to Confirmations.
+# Fill in with pointer positions from `cliclick p`:
+#   REFRESH_TAPS = [("another tab", 1100, 960), ("Confirmations tab", 1274, 960)]
+REFRESH_TAPS = []
+
+# Where the refresh gesture happens, relative to the trade offer's click point.
+# Positive moves it lower on the screen, negative higher (it used to be -40).
+REFRESH_Y_OFFSET = 0
+
+# Mouse-wheel refresh: this many wheel events of this many lines each.
+WHEEL_EVENTS = 28
+WHEEL_LINES = 6
+
+MIRRORING_APP = "iPhone Mirroring"
+MAX_TRADES_PER_RUN = 20
+
+# Pull-to-refresh swipe: starts at the trade offer's x, a little above the first
+# trade, and drags down by this many pixels.
+REFRESH_DRAG_PIXELS = 350
+REFRESH_DRAG_STEPS = 14
+
+
+class Clicker:
+    def __init__(self, dry_run):
+        self.dry_run = dry_run
+
+    def _cliclick(self, *commands, wait_ms=0):
+        args = ["cliclick"]
+        if wait_ms:
+            args += ["-w", str(wait_ms)]
+        args += list(commands)
+        if self.dry_run:
+            print("  [dry-run] " + " ".join(args))
+            return ""
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"cliclick failed: {result.stderr.strip() or result.stdout.strip()}")
+        return result.stdout
+
+    def pointer(self):
+        """Returns the current pointer (x, y), or None if it cannot be read."""
+        if self.dry_run:
+            return None
+        match = re.search(r"(-?\d+)\s*,\s*(-?\d+)", self._cliclick("p"))
+        return (int(match.group(1)), int(match.group(2))) if match else None
+
+    def move(self, x, y):
+        self._cliclick(f"m:{x},{y}")
+
+    def click(self, x, y):
+        self._cliclick(f"c:{x},{y}")
+
+    def drag_down(self, x, y, pixels, steps):
+        """A slow vertical drag, which iPhone Mirroring treats as a swipe."""
+        # `m:` sends plain mouse-moved events, which only push the cursor. A
+        # swipe needs mouse-dragged events (`dm:`) between the press and release.
+        commands = [f"dd:{x},{y}", "w:120"]
+        for step in range(1, steps + 1):
+            commands.append(f"dm:{x},{y + round(pixels * step / steps)}")
+        commands.append(f"du:{x},{y + pixels}")
+        self._cliclick(*commands, wait_ms=random.randint(18, 32))
+
+
+def jittered(point, spread):
+    return point[0] + random.randint(-spread, spread), point[1] + random.randint(-spread, spread)
+
+
+def pause(low, high, label=""):
+    seconds = random.uniform(low, high)
+    print(f"  waiting {seconds:.1f}s{' ' + label if label else ''}")
+    time.sleep(seconds)
+
+
+def mirroring_is_frontmost():
+    script = 'tell application "System Events" to get name of first process whose frontmost is true'
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    return result.returncode == 0 and result.stdout.strip() == MIRRORING_APP
+
+
+def focus_mirroring():
+    subprocess.run(["osascript", "-e", f'tell application "{MIRRORING_APP}" to activate'], capture_output=True)
+    time.sleep(1.0)
+
+
+def click_checked(clicker, target, what, check_focus, spread):
+    """Moves to the target, verifies it is safe, then clicks it."""
+    x, y = jittered(target, spread)
+    if check_focus and not clicker.dry_run and not mirroring_is_frontmost():
+        # Another app (for example the browser running the bot on this same Mac)
+        # may have taken focus. Take it back once before giving up.
+        focus_mirroring()
+        if not mirroring_is_frontmost():
+            raise RuntimeError(f"{MIRRORING_APP} is no longer the front app; stopping before clicking {what}.")
+    clicker.move(x, y)
+    time.sleep(random.uniform(0.15, 0.4))
+    # If the pointer is not where we just put it, the user grabbed the mouse.
+    position = clicker.pointer()
+    if position and (abs(position[0] - x) > 6 or abs(position[1] - y) > 6):
+        raise RuntimeError(f"Pointer moved away from {what} ({position} instead of {(x, y)}); stopping.")
+    print(f"  clicking {what} at {x},{y}")
+    clicker.click(x, y)
+
+
+def refresh_list(clicker, mode, spread, invert_scroll, check_focus=True):
+    start = jittered((TRADE_OFFER[0], TRADE_OFFER[1] + REFRESH_Y_OFFSET), spread)
+    if mode == "none":
+        print("Skipping the refresh.")
+    elif mode == "taps":
+        if not REFRESH_TAPS:
+            raise RuntimeError("REFRESH_TAPS is empty. Add the tap positions near the top of this script, or use --refresh-mode none.")
+        print("Refreshing the confirmations list (taps)…")
+        for label, x, y in REFRESH_TAPS:
+            click_checked(clicker, (x, y), label, check_focus, spread)
+            pause(1.0, 2.0, f"after tapping {label}")
+    elif mode == "wheel":
+        print("Refreshing the confirmations list (mouse-wheel scroll)…")
+        clicker.move(start[0], start[1])
+        if clicker.dry_run:
+            print(f"  [dry-run] wheel scroll ({WHEEL_EVENTS} events x {WHEEL_LINES} lines) at {start[0]},{start[1]}")
+        else:
+            from refresh_swipe import pull_with_wheel
+            time.sleep(0.3)
+            # Working variant found by testing: line units, session event tap.
+            pull_with_wheel(start[0], start[1], events=WHEEL_EVENTS, amount=WHEEL_LINES,
+                            invert=invert_scroll, line_units=True, session_tap=True)
+    elif mode == "replay":
+        print("Refreshing the confirmations list (replaying the recorded gesture)…")
+        clicker.move(start[0], start[1])
+        if clicker.dry_run:
+            print(f"  [dry-run] replay pull_refresh.json at {start[0]},{start[1]}")
+        else:
+            from gesture_replay import play_gesture
+            time.sleep(0.3)
+            play_gesture(start[0], start[1])
+    elif mode == "drag":
+        print("Refreshing the confirmations list (mouse drag)…")
+        clicker.drag_down(start[0], start[1], REFRESH_DRAG_PIXELS, REFRESH_DRAG_STEPS)
+    else:
+        print("Refreshing the confirmations list (trackpad-style scroll)…")
+        clicker.move(start[0], start[1])
+        if clicker.dry_run:
+            print(f"  [dry-run] scroll pull-down at {start[0]},{start[1]}")
+        else:
+            from refresh_swipe import pull_down_to_refresh
+            time.sleep(0.3)
+            pull_down_to_refresh(start[0], start[1], invert=invert_scroll)
+
+
+def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scroll):
+    clicker = Clicker(dry_run)
+
+    if not dry_run:
+        focus_mirroring()
+    if countdown:
+        print(f"Starting in {countdown}s. Do not touch the mouse; move it to stop.")
+        time.sleep(countdown)
+
+    refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
+    if refresh_mode != "none":
+        pause(2.0, 3.5, "for the list to refresh")
+
+    for number in range(1, count + 1):
+        print(f"Trade {number}/{count}")
+        click_checked(clicker, TRADE_OFFER, "the trade offer", check_focus, spread)
+        pause(1.2, 2.4, "for the offer to open")
+        click_checked(clicker, CONFIRM_BUTTON, "the confirm button", check_focus, spread)
+        if number < count:
+            # Steam goes back to the list and refreshes it by itself.
+            pause(4.0, 8.0, "for the list to reload with the next trade")
+
+    print(f"Done: clicked through {count} trade{'s' if count != 1 else ''}.")
+
+
+def main():
+    global WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET
+    parser = argparse.ArgumentParser(description="Accept Steam mobile trade confirmations via iPhone Mirroring.")
+    parser.add_argument("count", type=int, help=f"how many trades to accept (1-{MAX_TRADES_PER_RUN})")
+    parser.add_argument("--dry-run", action="store_true", help="print the actions without clicking anything")
+    parser.add_argument("--no-focus-check", action="store_true", help="do not require iPhone Mirroring to be the front app")
+    parser.add_argument("--countdown", type=int, default=3, help="seconds to wait before the first action (default 3)")
+    parser.add_argument("--jitter", type=int, default=5, help="random pixel offset applied to every click (default 5)")
+    parser.add_argument("--refresh-mode", choices=["wheel", "replay", "taps", "scroll", "drag", "none"], default="wheel",
+                        help="how to refresh the list first: mouse-wheel scroll (default), replay a recorded "
+                             "trackpad gesture, configured taps, synthetic trackpad scroll, mouse drag, or none")
+    parser.add_argument("--invert-scroll", action="store_true", help="reverse the scroll direction of the refresh")
+    parser.add_argument("--wheel-events", type=int, default=WHEEL_EVENTS,
+                        help=f"wheel mode: number of wheel events (default {WHEEL_EVENTS})")
+    parser.add_argument("--wheel-lines", type=int, default=WHEEL_LINES,
+                        help=f"wheel mode: lines per wheel event (default {WHEEL_LINES})")
+    parser.add_argument("--refresh-y-offset", type=int, default=REFRESH_Y_OFFSET,
+                        help=f"pixels below (+) or above (-) the trade offer where the refresh happens (default {REFRESH_Y_OFFSET})")
+    args = parser.parse_args()
+    WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET = args.wheel_events, args.wheel_lines, args.refresh_y_offset
+
+    if not 1 <= args.count <= MAX_TRADES_PER_RUN:
+        parser.error(f"count must be between 1 and {MAX_TRADES_PER_RUN}")
+
+    try:
+        run(args.count, args.dry_run, not args.no_focus_check, args.countdown, args.jitter,
+            args.refresh_mode, args.invert_scroll)
+    except (RuntimeError, KeyboardInterrupt) as error:
+        print(f"\nStopped: {error or 'interrupted'}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

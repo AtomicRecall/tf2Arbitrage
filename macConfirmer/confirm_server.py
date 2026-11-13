@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Small HTTP server that lets the PC add-on ask this Mac to accept trade
+confirmations in the Steam app (through iPhone Mirroring).
+
+  python3 confirm_server.py                  # listens on 127.0.0.1:8765 (this Mac only)
+  python3 confirm_server.py --host 0.0.0.0   # also reachable from other devices on the network
+  python3 confirm_server.py --dry-run        # accepts requests but clicks nothing
+
+Endpoints (all but /ping need the header `X-Confirm-Token: <token>`):
+  GET  /ping      -> {"ok": true}                      connectivity check, no token
+  GET  /status    -> queue, busy/paused state, recent results
+  POST /confirm   -> {"offerIds": ["123", "456"]}      accept that many trades
+                     or {"count": 2}; add "retry": true to ask again for offers
+                     that were already marked done but are still unconfirmed
+  POST /resume    -> clears a pause caused by a failure
+  POST /cancel    -> drops everything still waiting in the queue
+
+Safety rules:
+  * only private-network clients are served (and only --allow addresses if given)
+  * the token is created on first start and stored in server_config.json
+  * one confirmation run at a time, with a random delay before each run
+  * a per-request, per-hour limit; offer ids already queued or done are ignored
+  * any failure pauses the server until /resume, so a wrong click never repeats
+
+The bot offers are matched by count, not by identity: the Steam app lists
+pending confirmations and this clicks the top one. Do not leave unrelated
+confirmations pending while it runs.
+"""
+
+import argparse
+import collections
+import ipaddress
+import json
+import random
+import secrets
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import confirm_trades
+
+CONFIG_FILE = Path(__file__).with_name("server_config.json")
+MAX_BODY_BYTES = 4096
+MAX_PER_REQUEST = 5
+HISTORY_LENGTH = 20
+
+
+def load_token():
+    if CONFIG_FILE.exists():
+        token = json.loads(CONFIG_FILE.read_text()).get("token")
+        if token:
+            return token
+    token = secrets.token_urlsafe(24)
+    CONFIG_FILE.write_text(json.dumps({"token": token}))
+    try:
+        CONFIG_FILE.chmod(0o600)
+    except OSError:
+        pass
+    print(f"Created a new token in {CONFIG_FILE.name}.")
+    return token
+
+
+def log(message):
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+class Confirmer:
+    """Owns the queue and the single worker that performs the clicks."""
+
+    def __init__(self, dry_run, min_delay, max_delay, max_per_hour):
+        self.dry_run = dry_run
+        self.min_delay, self.max_delay = min_delay, max_delay
+        self.max_per_hour = max_per_hour
+        self.cond = threading.Condition()
+        self.queue = collections.deque()  # (count, [offer ids])
+        self.active_ids = set()  # offer ids queued or being confirmed right now
+        self.done_ids = set()  # offer ids already confirmed
+        self.confirmed_times = collections.deque()  # one entry per trade accepted
+        self.history = collections.deque(maxlen=HISTORY_LENGTH)
+        self.busy = False
+        self.paused_reason = ""
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    # -- requests -------------------------------------------------------------
+    def _confirmed_last_hour(self):
+        cutoff = time.time() - 3600
+        while self.confirmed_times and self.confirmed_times[0] < cutoff:
+            self.confirmed_times.popleft()
+        return len(self.confirmed_times)
+
+    def enqueue(self, count, offer_ids, retry=False):
+        with self.cond:
+            if self.paused_reason:
+                return 503, {"ok": False, "error": f"Paused: {self.paused_reason}. POST /resume once it is fixed."}
+            if offer_ids:
+                # A retry asks again for offers already marked done (the click
+                # did not take effect); anything still queued or running is skipped.
+                skip = self.active_ids if retry else self.active_ids | self.done_ids
+                fresh = [offer_id for offer_id in offer_ids if offer_id not in skip]
+                count = len(fresh)
+                if not count:
+                    return 200, {"ok": True, "queued": 0, "duplicate": True}
+            else:
+                fresh = []
+            if not 1 <= count <= MAX_PER_REQUEST:
+                return 400, {"ok": False, "error": f"count must be between 1 and {MAX_PER_REQUEST}"}
+            waiting = sum(job[0] for job in self.queue)
+            if self._confirmed_last_hour() + waiting + count > self.max_per_hour:
+                return 429, {"ok": False, "error": f"Hourly limit of {self.max_per_hour} confirmations reached."}
+            self.active_ids.update(fresh)
+            self.done_ids.difference_update(fresh)
+            self.queue.append((count, fresh))
+            self.cond.notify()
+            log(f"Queued {count} confirmation{'s' if count != 1 else ''} {fresh or ''}".rstrip())
+            return 202, {"ok": True, "queued": count, "queueLength": len(self.queue)}
+
+    def resume(self):
+        with self.cond:
+            self.paused_reason = ""
+            self.cond.notify()
+        log("Resumed.")
+        return 200, {"ok": True}
+
+    def cancel(self):
+        with self.cond:
+            dropped = sum(job[0] for job in self.queue)
+            for _, ids in self.queue:
+                self.active_ids.difference_update(ids)
+            self.queue.clear()
+        log(f"Cancelled {dropped} waiting confirmations.")
+        return 200, {"ok": True, "dropped": dropped}
+
+    def status(self):
+        with self.cond:
+            return 200, {
+                "ok": True,
+                "dryRun": self.dry_run,
+                "busy": self.busy,
+                "paused": self.paused_reason or None,
+                "waiting": sum(job[0] for job in self.queue),
+                "confirmedLastHour": self._confirmed_last_hour(),
+                "hourlyLimit": self.max_per_hour,
+                "recent": list(self.history),
+            }
+
+    # -- worker ---------------------------------------------------------------
+    def _next_batch(self):
+        """Waits for work, then merges every waiting job into one run."""
+        with self.cond:
+            while not self.queue or self.paused_reason:
+                self.cond.wait()
+            total, ids = 0, []
+            while self.queue and total + self.queue[0][0] <= confirm_trades.MAX_TRADES_PER_RUN:
+                count, job_ids = self.queue.popleft()
+                total += count
+                ids += job_ids
+            self.busy = True
+            return total, ids
+
+    def _worker(self):
+        while True:
+            count, ids = self._next_batch()
+            try:
+                delay = random.uniform(self.min_delay, self.max_delay)
+                log(f"Accepting {count} trade{'s' if count != 1 else ''} in {delay:.1f}s…")
+                time.sleep(delay)
+                confirm_trades.run(count, self.dry_run, True, 0, 5, "wheel", False)
+                with self.cond:
+                    self.active_ids.difference_update(ids)
+                    self.done_ids.update(ids)
+                    self.confirmed_times.extend([time.time()] * count)
+                    self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": True})
+                log(f"Done: {count} accepted.")
+            except BaseException as error:  # a failed run must never be repeated blindly
+                reason = str(error) or error.__class__.__name__
+                with self.cond:
+                    self.active_ids.difference_update(ids)  # let the add-on ask again after /resume
+                    self.paused_reason = reason
+                    self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": False, "error": reason})
+                log(f"FAILED: {reason}. Paused until POST /resume.")
+            finally:
+                with self.cond:
+                    self.busy = False
+
+
+def make_handler(confirmer, token, allowed):
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "ConfirmServer/1.0"
+
+        def log_message(self, fmt, *args):  # quieter than the default
+            pass
+
+        def _send(self, status, body):
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _client_allowed(self):
+            address = ipaddress.ip_address(self.client_address[0])
+            if allowed:
+                return address in allowed
+            return address.is_private or address.is_loopback
+
+        def _authorized(self):
+            supplied = self.headers.get("X-Confirm-Token", "")
+            return secrets.compare_digest(supplied.encode(), token.encode())
+
+        def _read_json(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY_BYTES:
+                raise ValueError("body too large")
+            return json.loads(self.rfile.read(length) or b"{}")
+
+        def _dispatch(self, method):
+            if not self._client_allowed():
+                return self._send(403, {"ok": False, "error": "client not allowed"})
+            path = self.path.split("?")[0]
+            if method == "GET" and path == "/ping":
+                return self._send(200, {"ok": True})
+            if not self._authorized():
+                log(f"Rejected {method} {path} from {self.client_address[0]}: bad token")
+                return self._send(401, {"ok": False, "error": "bad token"})
+            try:
+                if method == "GET" and path == "/status":
+                    return self._send(*confirmer.status())
+                if method == "POST" and path == "/confirm":
+                    body = self._read_json()
+                    ids = [str(item) for item in body.get("offerIds", [])]
+                    if any(not item.isdigit() for item in ids):
+                        return self._send(400, {"ok": False, "error": "offerIds must be numeric"})
+                    count = int(body.get("count", 0)) if not ids else len(ids)
+                    return self._send(*confirmer.enqueue(count, ids, retry=body.get("retry") is True))
+                if method == "POST" and path == "/resume":
+                    return self._send(*confirmer.resume())
+                if method == "POST" and path == "/cancel":
+                    return self._send(*confirmer.cancel())
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                return self._send(400, {"ok": False, "error": f"bad request: {error}"})
+            return self._send(404, {"ok": False, "error": "not found"})
+
+        def do_GET(self):
+            self._dispatch("GET")
+
+        def do_POST(self):
+            self._dispatch("POST")
+
+    return Handler
+
+
+def main():
+    parser = argparse.ArgumentParser(description="HTTP server for Steam mobile confirmations via iPhone Mirroring.")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="address to listen on (default 127.0.0.1: this Mac only; use 0.0.0.0 for other devices on your network)")
+    parser.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
+    parser.add_argument("--allow", action="append", default=[], metavar="IP",
+                        help="only serve this client IP (repeatable); default: any private-network address")
+    parser.add_argument("--dry-run", action="store_true", help="accept requests but click nothing")
+    parser.add_argument("--min-delay", type=float, default=3.0, help="minimum seconds before each run (default 3)")
+    parser.add_argument("--max-delay", type=float, default=10.0, help="maximum seconds before each run (default 10)")
+    parser.add_argument("--max-per-hour", type=int, default=30, help="confirmations allowed per hour (default 30)")
+    parser.add_argument("--wheel-events", type=int, default=confirm_trades.WHEEL_EVENTS)
+    parser.add_argument("--wheel-lines", type=int, default=confirm_trades.WHEEL_LINES)
+    parser.add_argument("--refresh-y-offset", type=int, default=confirm_trades.REFRESH_Y_OFFSET)
+    args = parser.parse_args()
+    if args.min_delay > args.max_delay:
+        parser.error("--min-delay cannot be larger than --max-delay")
+
+    confirm_trades.WHEEL_EVENTS = args.wheel_events
+    confirm_trades.WHEEL_LINES = args.wheel_lines
+    confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
+
+    token = load_token()
+    allowed = {ipaddress.ip_address(item) for item in args.allow}
+    confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour)
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(confirmer, token, allowed))
+    log(f"Listening on {args.host}:{args.port}{' (DRY RUN: no clicks)' if args.dry_run else ''}")
+    log(f"Token: {token}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log("Stopped.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

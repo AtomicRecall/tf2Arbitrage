@@ -1,0 +1,62 @@
+﻿{
+  "manifest_version": 3,
+  "name": "TF2 Metal Trader",
+  "version": "0.9.124",
+  "description": "Steam trade automation with safe arbitrage metal availability testing.",
+  "permissions": [],
+  "host_permissions": [
+    "https://backpack.tf/*",
+    "https://www.backpack.tf/*",
+    "https://steamcommunity.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://backpack.tf/*",
+        "https://www.backpack.tf/*",
+        "https://stntrading.eu/item/*",
+        "https://www.stntrading.eu/item/*"
+      ],
+      "js": [
+        "backpack.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://steamcommunity.com/tradeoffer/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page-bridge.js"
+      ],
+      "matches": [
+        "https://steamcommunity.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "TF2 Metal Trader v0.9.124"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tf2-metal-trader@example.local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  }
+}
