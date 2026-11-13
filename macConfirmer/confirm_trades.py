@@ -46,6 +46,10 @@ REFRESH_Y_OFFSET = 0
 WHEEL_EVENTS = 28
 WHEEL_LINES = 6
 
+# iPhone Mirroring lags, so a single click is sometimes not registered. Every
+# click is sent twice, this many milliseconds apart (0 = a single click).
+CLICK_REPEAT_MS = 120
+
 MIRRORING_APP = "iPhone Mirroring"
 MAX_TRADES_PER_RUN = 20
 
@@ -105,7 +109,12 @@ class Clicker:
         self._cliclick(f"m:{x},{y}")
 
     def click(self, x, y):
-        self._cliclick(f"c:{x},{y}")
+        if CLICK_REPEAT_MS > 0:
+            # One cliclick call, so the gap between the two clicks is exact.
+            gap = max(20, CLICK_REPEAT_MS + random.randint(-30, 30))
+            self._cliclick(f"c:{x},{y}", f"w:{gap}", f"c:{x},{y}")
+        else:
+            self._cliclick(f"c:{x},{y}")
 
     def drag_down(self, x, y, pixels, steps):
         """A slow vertical drag, which iPhone Mirroring treats as a swipe."""
@@ -229,7 +238,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
 
 
 def main():
-    global WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET
+    global WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET, CLICK_REPEAT_MS
     parser = argparse.ArgumentParser(description="Accept Steam mobile trade confirmations via iPhone Mirroring.")
     parser.add_argument("count", type=int, help=f"how many trades to accept (1-{MAX_TRADES_PER_RUN})")
     parser.add_argument("--dry-run", action="store_true", help="print the actions without clicking anything")
@@ -246,8 +255,11 @@ def main():
                         help=f"wheel mode: lines per wheel event (default {WHEEL_LINES})")
     parser.add_argument("--refresh-y-offset", type=int, default=REFRESH_Y_OFFSET,
                         help=f"pixels below (+) or above (-) the trade offer where the refresh happens (default {REFRESH_Y_OFFSET})")
+    parser.add_argument("--click-repeat-ms", type=int, default=CLICK_REPEAT_MS,
+                        help=f"send every click twice, this many ms apart; 0 = single click (default {CLICK_REPEAT_MS})")
     args = parser.parse_args()
     WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET = args.wheel_events, args.wheel_lines, args.refresh_y_offset
+    CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
 
     if not 1 <= args.count <= MAX_TRADES_PER_RUN:
         parser.error(f"count must be between 1 and {MAX_TRADES_PER_RUN}")

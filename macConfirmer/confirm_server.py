@@ -283,6 +283,8 @@ def main():
     parser.add_argument("--wheel-events", type=int, default=confirm_trades.WHEEL_EVENTS)
     parser.add_argument("--wheel-lines", type=int, default=confirm_trades.WHEEL_LINES)
     parser.add_argument("--refresh-y-offset", type=int, default=confirm_trades.REFRESH_Y_OFFSET)
+    parser.add_argument("--click-repeat-ms", type=int, default=confirm_trades.CLICK_REPEAT_MS,
+                        help="send every click twice, this many ms apart; 0 = single click (default %(default)s)")
     args = parser.parse_args()
     if args.min_delay > args.max_delay:
         parser.error("--min-delay cannot be larger than --max-delay")
@@ -290,6 +292,7 @@ def main():
     confirm_trades.WHEEL_EVENTS = args.wheel_events
     confirm_trades.WHEEL_LINES = args.wheel_lines
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
+    confirm_trades.CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
 
     preflight(args.dry_run)
     token = load_token()

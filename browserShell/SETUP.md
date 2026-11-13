@@ -24,7 +24,16 @@ Mac confirmation server alongside it.
    it off with its checkbox and the choice is kept.
 6. When everything checks out, start it without `--server-dry-run`.
 
-Optional: `browserShell/make_app.sh` builds a double-clickable `TF2 Trader.app`.
+## Starting it without typing a command
+
+- **`browserShell/TF2 Trader.command`**: double-click it in Finder. It opens a Terminal window that runs the launcher.
+  (If macOS blocks it the first time: right-click > Open. If it does not run, `chmod +x "browserShell/TF2 Trader.command"` once.)
+- **`TF2 Trader.app`**: run `browserShell/make_app.sh` once to build it in the project folder, then double-click it or drag it to the Dock.
+  It also opens Terminal, so the clicks use Terminal's Accessibility / Input Monitoring permissions and the server output stays visible.
+  The first time, macOS asks whether the app may control Terminal: allow it.
+
+Both start the real server (clicks on). For the dry run in step 4, use `python3 browserShell/launch.py --server-dry-run`.
+Close Firefox to stop everything.
 
 ## What the sidebar does
 
