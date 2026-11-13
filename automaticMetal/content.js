@@ -1060,6 +1060,7 @@
           console.warn(`TF2 Metal Trader: could not finish adding ${kind} metal; continuing with the others.`, error);
         }
         remaining = targetScrap - stagedScrap();
+        console.log(`TF2 Metal Trader: after ${kind}, staged ${JSON.stringify(readStagedMetal())} = ${stagedScrap()} of ${targetScrap} scrap; ${Math.max(0, remaining)} still needed.`);
       };
 
       if (!badTrader) {
@@ -2326,26 +2327,21 @@
           // rendered Steam economy image matches the
           // exact denomination image we requested.
           if (label === "refined" || label === "reclaimed" || label === "scrap") {
-            const expected = String(imageUrl || "").trim().toLowerCase()
-              .replace(/\/(?:\d+f?x\d+f?)$/, "");
-            return [...item.querySelectorAll("img")].some(image => {
-              const sources = [
-                image.currentSrc,
-                image.getAttribute("src"),
-                image.getAttribute("data-src"),
-                image.getAttribute("data-original")
-              ].filter(Boolean);
-              return sources.some(src => {
-                let value = String(src).trim().toLowerCase().split("?")[0].split("#")[0];
-                return value.replace(/\/(?:\d+f?x\d+f?)$/, "") === expected;
-              });
-            });
+            // Compare the image path only (the same way the search wait and the
+            // staged-metal reader do). The full URL includes the CDN host and
+            // size, which Steam varies, and comparing it made a trader's metal
+            // look absent even though the search had found it.
+            return inventoryItemMatchesImage(item, imageUrl);
           }
 
           return true;
         });
 
-      if (items.length === 0) break;
+      if (items.length === 0) {
+        const shown = page.querySelectorAll('.itemHolder .item.app440, .itemHolder .item[id^="item440_"]').length;
+        console.log(`TF2 Metal Trader: ${label} search pass ${searchPass} on the ${side} side matched 0 of ${shown} listed items; stopping this denomination at ${added}.`);
+        break;
+      }
 
       const beforePass = added;
       for (const target of items) {

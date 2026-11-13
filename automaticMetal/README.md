@@ -6,6 +6,8 @@ Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam t
 
 - The price is now covered by all three denominations together. 1.77 ref (16 scrap) is met by 1 refined + 2 reclaimed + 1 scrap; the trader does not need enough of any single kind.
 - Pass 1 stages whole items that fit the remaining price, largest first (refined, then reclaimed, then scrap). Pass 2 tops up any gap with the smallest whole item that closes it (reclaimed, then refined), for example when the trader has no scrap.
+- Fix: the trader's metal items were matched by their full image URL (CDN host and size included), so a different host or size made metal that Steam's search had found look absent. They are now matched by image path, like the rest of the metal code.
+- The console logs how much of the price is staged after each denomination, and when a search listed items that did not match.
 - A problem with one denomination (a Steam hiccup, nothing found) no longer ends the check: what was staged is kept and the other denominations are still tried. The check only fails if the combined total is still short.
 
 ## v0.9.124 — key prices are paid with physical keys only when the payer has enough
