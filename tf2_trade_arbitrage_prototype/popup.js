@@ -438,14 +438,17 @@ function showMacStatus(message,kind=""){
 function normalizedMacUrl(){
   return macUrl.value.trim().replace(/\/+$/,"");
 }
-api.storage.local.get({macConfirmer:{}},v=>{
+function loadMacSettings(){api.storage.local.get({macConfirmer:{}},v=>{
   const saved=v.macConfirmer||{};
   macUrl.value=saved.url||"";
   macEnabled.checked=Boolean(saved.enabled);
   macTokenSaved=Boolean(saved.token);
   macToken.placeholder=macTokenSaved?"Saved (hidden). Type to replace.":"";
   if(saved.url&&macTokenSaved)showMacStatus(saved.enabled?"Enabled.":"Saved but switched off.","saved");
-});
+})}
+loadMacSettings();
+// The launcher fills these in shortly after the browser starts.
+api.storage.onChanged.addListener((changes,area)=>{if(area==="local"&&changes.macConfirmer)loadMacSettings()});
 saveMac.onclick=async()=>{
   const url=normalizedMacUrl();
   const token=macToken.value.trim()||(macTokenSaved?(await new Promise(r=>api.storage.local.get({macConfirmer:{}},v=>r(v.macConfirmer?.token||"")))):"");

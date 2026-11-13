@@ -17,11 +17,11 @@ Mac confirmation server alongside it.
    python3 browserShell/launch.py --server-dry-run
    ```
 
-5. In the browser, sign in to Steam, backpack.tf and stntrading.eu. In the
-   sidebar, enter your Steam Web API key and key rate, then open
-   **Mac confirmer**, set the address to `http://127.0.0.1:8765`, paste the token the
-   server printed (also in `macConfirmer/server_config.json`), tick the box, **Save**,
-   and **Test connection**. These settings live in the profile and persist.
+5. In the browser, sign in to Steam, backpack.tf and stntrading.eu (the browser keeps you signed in
+   after restarts), and enter your Steam Web API key and key rate in the sidebar. The **Mac confirmer**
+   settings are filled in for you: the launcher creates the server's token, hands it to the add-on, and
+   enables it. Open the Mac confirmer section and press **Test connection** to check it. You can switch
+   it off with its checkbox and the choice is kept.
 6. When everything checks out, start it without `--server-dry-run`.
 
 Optional: `browserShell/make_app.sh` builds a double-clickable `TF2 Trader.app`.

@@ -13,6 +13,9 @@ Workflow:
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
 
+V0.7.105 changes:
+- The Mac confirmer needs no manual setup when the browser is started by browserShell/launch.py. The launcher creates the confirm server's token, packs it with the local address into the add-on (mac-confirmer.json), and mac-confirmer-seed.js fills in the Mac confirmer settings from it on start-up (enabled by default; later changes to the checkbox are kept). Only http://127.0.0.1 / localhost addresses are accepted this way. The launcher also checks that the server came up, warns if cliclick is missing, and opens iPhone Mirroring.
+
 V0.7.104 changes:
 - Logins and settings survive browser restarts. cookie-keeper.js (new, needs the cookies permission) turns the session cookies of steamcommunity.com, steampowered.com, stntrading.eu and backpack.tf into 30-day cookies, because Firefox drops session cookies on quit. Logging out on a site is not undone. A checkbox in the popup/sidebar switches it off. The Steam Web API key and other add-on settings were already stored persistently in the profile. browserShell/profile/user.js now also states that nothing is cleared on exit.
 

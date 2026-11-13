@@ -21,10 +21,12 @@ import argparse
 import json
 import os
 import platform
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -33,6 +35,12 @@ ROOT = SHELL_DIR.parent
 EXTENSION_DIRS = ["tf2_trade_arbitrage_prototype", "automaticMetal"]
 SERVER_SCRIPT = ROOT / "macConfirmer" / "confirm_server.py"
 SERVER_HOST, SERVER_PORT = "127.0.0.1", 8765
+SERVER_CONFIG = ROOT / "macConfirmer" / "server_config.json"
+
+# The analyzer add-on reads this file from its own package on start-up and
+# fills in its "Mac confirmer" settings, so nothing has to be typed in.
+ANALYZER_FOLDER = "tf2_trade_arbitrage_prototype"
+BUNDLED_CONFIG_NAME = "mac-confirmer.json"
 
 HOME_URL = (
     "https://stntrading.eu/tf2/hats"
@@ -73,8 +81,25 @@ def read_manifest(folder):
     return json.loads((ROOT / folder / "manifest.json").read_text(encoding="utf-8-sig"))
 
 
-def build_xpi(folder, destination_dir):
-    """Zips an extension folder to <extension id>.xpi. Returns (path, id, version)."""
+def ensure_server_token():
+    """The confirm server's token, created the same way the server does if needed."""
+    if SERVER_CONFIG.exists():
+        token = json.loads(SERVER_CONFIG.read_text()).get("token")
+        if token:
+            return token
+    token = secrets.token_urlsafe(24)
+    SERVER_CONFIG.write_text(json.dumps({"token": token}))
+    try:
+        SERVER_CONFIG.chmod(0o600)
+    except OSError:
+        pass
+    return token
+
+
+def build_xpi(folder, destination_dir, extra_files=None):
+    """Zips an extension folder to <extension id>.xpi. Returns (path, id, version).
+
+    `extra_files` maps a name to text that is added to the package."""
     manifest = read_manifest(folder)
     extension_id = manifest.get("browser_specific_settings", {}).get("gecko", {}).get("id")
     if not extension_id:
@@ -89,6 +114,8 @@ def build_xpi(folder, destination_dir):
             if relative.parts[0].startswith(SKIP_PREFIXES):
                 continue
             archive.write(path, relative.as_posix())
+        for name, text in (extra_files or {}).items():
+            archive.writestr(name, text)
     return destination, extension_id, manifest.get("version", "?")
 
 
@@ -102,7 +129,16 @@ def prepare_profile(profile_dir):
     (profile_dir / "user.js").write_text(user_js, encoding="utf-8")
     shutil.copyfile(SHELL_DIR / "profile" / "chrome" / "userChrome.css", profile_dir / "chrome" / "userChrome.css")
 
-    built = [build_xpi(folder, extensions_dir) for folder in EXTENSION_DIRS]
+    # The token lives only in the profile's package, never in the project files.
+    mac_confirmer = json.dumps({
+        "url": f"http://{SERVER_HOST}:{SERVER_PORT}",
+        "token": ensure_server_token(),
+        "enabled": True,
+    })
+    built = [
+        build_xpi(folder, extensions_dir, {BUNDLED_CONFIG_NAME: mac_confirmer} if folder == ANALYZER_FOLDER else None)
+        for folder in EXTENSION_DIRS
+    ]
     for path, extension_id, version in built:
         print(f"  add-on {extension_id} v{version} -> {path.name}")
 
@@ -123,8 +159,33 @@ def start_server(server_dry_run):
     command = [sys.executable, str(SERVER_SCRIPT), "--host", SERVER_HOST, "--port", str(SERVER_PORT)]
     if server_dry_run:
         command.append("--dry-run")
+    if not server_dry_run and platform.system() == "Darwin" and not shutil.which("cliclick"):
+        print("WARNING: cliclick is not installed (brew install cliclick); the server will start but cannot click.")
     print("Starting the confirm server" + (" (dry run: no clicks)" if server_dry_run else "") + "…")
-    return subprocess.Popen(command, cwd=SERVER_SCRIPT.parent)
+    process = subprocess.Popen(command, cwd=SERVER_SCRIPT.parent)
+    # Make sure it really came up before the browser relies on it.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            print(f"WARNING: the confirm server exited immediately (code {process.returncode}); check its output above.")
+            return None
+        if server_listening():
+            print(f"Confirm server ready on {SERVER_HOST}:{SERVER_PORT}; the add-on is configured to use it.")
+            return process
+        time.sleep(0.2)
+    print("WARNING: the confirm server did not start listening within 5 seconds.")
+    return process
+
+
+def open_iphone_mirroring():
+    """Opens iPhone Mirroring so it is ready for the confirmation clicks."""
+    if platform.system() != "Darwin":
+        return
+    result = subprocess.run(["open", "-a", "iPhone Mirroring"], capture_output=True)
+    if result.returncode != 0:
+        print("Could not open iPhone Mirroring; open it yourself before trades need confirming.")
+    else:
+        print("Opened iPhone Mirroring. Keep the iPhone locked, and the Steam app on its Confirmations screen.")
 
 
 def start_caffeinate():
@@ -140,6 +201,7 @@ def main():
     parser.add_argument("--firefox", help="path to the Firefox binary (default: Developer Edition, Nightly, then Firefox)")
     parser.add_argument("--no-server", action="store_true", help="do not start the confirm server")
     parser.add_argument("--server-dry-run", action="store_true", help="the server accepts requests but clicks nothing")
+    parser.add_argument("--no-mirroring", action="store_true", help="do not open iPhone Mirroring")
     parser.add_argument("--dry-run", action="store_true", help="prepare the profile and print the commands without starting anything")
     args = parser.parse_args()
 
@@ -158,6 +220,8 @@ def main():
         print("WARNING: this Firefox build may refuse the unsigned add-ons. Firefox Developer Edition is recommended.")
 
     server = None if args.no_server else start_server(args.server_dry_run)
+    if not args.no_server and not args.no_mirroring:
+        open_iphone_mirroring()
     caffeinate = start_caffeinate()
     try:
         print("Starting Firefox. Close its window to stop everything.")
