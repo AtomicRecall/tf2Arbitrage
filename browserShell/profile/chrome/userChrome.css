@@ -25,3 +25,10 @@ menuitem[key="key_toggleSidebar"] {
 #PersonalToolbar {
   display: none !important;
 }
+
+/* The scanner window (the add-on gives it the title preface "TF2 Arbitrage
+   Scanner — ") is only there to run checks, so it gets no sidebar. */
+:root[titlepreface^="TF2 Arbitrage Scanner"] #sidebar-box,
+:root[titlepreface^="TF2 Arbitrage Scanner"] #sidebar-splitter {
+  display: none !important;
+}

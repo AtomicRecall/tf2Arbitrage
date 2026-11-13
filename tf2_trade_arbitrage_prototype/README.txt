@@ -13,6 +13,10 @@ Workflow:
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
 
+V0.7.106 changes:
+- The Mac confirmer is now also asked to confirm the STN purchase offer. Before, it was only asked for sent bot offers, so accepting the STN offer waited for a manual phone confirmation. It is asked as soon as the offer page says Steam needs the confirmation, or when the Web API reports state 9.
+- The scanner window no longer shows the sidebar in the TF2 Trader browser (browserShell/profile/chrome/userChrome.css).
+
 V0.7.105 changes:
 - The Mac confirmer needs no manual setup when the browser is started by browserShell/launch.py. The launcher creates the confirm server's token, packs it with the local address into the add-on (mac-confirmer.json), and mac-confirmer-seed.js fills in the Mac confirmer settings from it on start-up (enabled by default; later changes to the checkbox are kept). Only http://127.0.0.1 / localhost addresses are accepted this way. The launcher also checks that the server came up, warns if cliclick is missing, and opens iPhone Mirroring.
 

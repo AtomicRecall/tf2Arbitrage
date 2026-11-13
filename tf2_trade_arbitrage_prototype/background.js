@@ -666,11 +666,19 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
   setSteamApiPurchaseProgress(
     job,
     "steam-api-polling",
-    `Waiting for Steam Web API state 3 (Accepted) for offer #${offerId}. Mobile confirmation remains manual.`
+    `Waiting for Steam Web API state 3 (Accepted) for offer #${offerId}. The Mac confirmer handles the mobile confirmation when it is enabled; otherwise confirm on your phone.`
   );
 
   // The offer page saw Steam accept the offer (no further confirmation needed).
   const acceptedByPage=()=>job.purchaseAcceptedOfferId===String(offerId);
+  // Accepting an STN offer also needs the Steam Mobile confirmation. This entry
+  // lets the Mac confirmer handle it the same way as a sent bot offer.
+  const macEntry={offerId:String(offerId),needsConfirmation:false};
+  const askMac=async(waitingForConfirmation)=>{
+    macEntry.needsConfirmation=waitingForConfirmation;
+    if(!waitingForConfirmation)return;
+    await requestMacConfirmations([macEntry]).catch(error=>console.warn("Mac confirmer request failed:",error));
+  };
   // Sleeps between API polls but wakes at once when the page reports acceptance.
   const pollPause=async()=>{
     const until=Date.now()+STEAM_TRADE_OFFER_POLL_MS;
@@ -682,6 +690,9 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
       setSteamApiPurchaseProgress(job,"steam-page-accepted",`Steam accepted offer #${offerId} on its offer page (accept request succeeded). Not waiting for the Web API to catch up.`);
       return 3;
     }
+    // The offer page said Steam needs the mobile confirmation: ask the Mac now,
+    // without waiting for the lagging Web API to show state 9.
+    if(job.purchaseNeedsConfirmationOfferId===String(offerId))await askMac(true);
     let offers;
     try{
       offers=await fetchSteamReceivedOffers(apiKey);
@@ -742,11 +753,14 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
         :state===3
           ?`Steam Web API confirms offer #${offerId} is Accepted (state 3).`
           :state===9
-            ?`Steam Web API reports offer #${offerId} is awaiting your manual Steam Mobile confirmation (state 9).`
+            ?`Steam Web API reports offer #${offerId} is awaiting the Steam Mobile confirmation (state 9).`
             :state===11
               ?`Steam Web API reports offer #${offerId} is in escrow (state 11). Escrow is not treated as completed.`
               :`Steam Web API reports offer #${offerId}: ${stateName} (state ${state}).`;
       setSteamApiPurchaseProgress(job,phase,message,state);
+      // State 9 means Steam is waiting for the mobile confirmation.
+      if(state===9)await askMac(true);
+      else macEntry.needsConfirmation=false;
 
       if(state===3)return state;
       if(state===11){
@@ -823,6 +837,7 @@ async function acceptStnPurchaseBatch(job,batchNumber,batchAmount,rawOfferUrl,st
   job.purchaseOfferId=purchaseOfferId;
   job.purchasePageProgress=null;
   delete job.purchaseAcceptedOfferId;
+  delete job.purchaseNeedsConfirmationOfferId;
   job.purchaseOfferIds=[...(job.purchaseOfferIds||[]),purchaseOfferId];
   setSteamApiPurchaseProgress(
     job,
@@ -1021,8 +1036,10 @@ async function macConfirmerFetch(settings,path,body){
 // Asks the Mac to confirm every tracked offer that is waiting in state 9.
 // Offers are asked for once; if one is still in state 9 after two minutes the
 // request is repeated (at most MAC_CONFIRM_MAX_REQUESTS times).
-async function requestMacConfirmations(){
-  const waiting=[...trackedBotOffers.values()].filter(entry=>entry.needsConfirmation&&entry.offerId);
+// `entries` defaults to the tracked bot offers; the STN purchase offer passes
+// its own entry, since it is accepted from the STN side and never tracked there.
+async function requestMacConfirmations(entries=[...trackedBotOffers.values()]){
+  const waiting=entries.filter(entry=>entry.needsConfirmation&&entry.offerId);
   if(!waiting.length)return;
   let settings;
   try{settings=await loadMacConfirmerSettings()}
@@ -2909,6 +2926,8 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       // Web API to say the same thing.
       if(m.evidenceSource==="Steam accept request"&&m.needsConfirmation!==true){
         purchaseJob.purchaseAcceptedOfferId=purchaseJob.purchaseOfferId;
+      }else if(m.needsConfirmation===true){
+        purchaseJob.purchaseNeedsConfirmationOfferId=purchaseJob.purchaseOfferId;
       }
       purchaseJob.purchasePageProgress={
         phase:"steam-accepted-observed",
