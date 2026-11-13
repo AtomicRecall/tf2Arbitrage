@@ -618,10 +618,15 @@
         throw new Error(`Steam's ${side === "their" ? "Their" : "Your"} inventory was not active before selecting a weapon.`);
       }
       const excludedWeaponImages = new Set([
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwYYYh3uuTVGnMD0AuWJGt8Mmsgy4N4E2zIzxAQrYuW2YWcycFKaUvAIWvdt9lm1D3Zr6pM2Voez8esAcA7pqsKYZA9iUxzv/96fx96fdpx2x",
         "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwQCWhTduS9Tt8TnH_WJRuNVy49itMUB32JtklgoN7OzZTQxJFPEV_lfBa1irV-9C3Zr6sU6AdH457UBFLISf9s/96fx96f",
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwQCWhTduS9Tt8TnH_WJRuNVy49itMUB32JtklgoN7OzZTQxJFPEV_lfBa1irV-9C3Zr6sU6AdH457UBFLISf9s/96fx96fdpx2x",
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwQCWhTduS9Tt8TnH_WJRuJZyoMx5MMMi2FtlVUuZbblM29hKwaUBaVYDfRuoVu7DCIxvsZmVoH457UBFLISf9s/96fx96fdpx2x",
         "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwQCWhTduS9Tt8TnH_WJRuJZyoMx5MMMi2FtlVUuZbblM29hKwaUBaVYDfRuoVu7DCIxvsZmVoH457UBFLISf9s/96fx96f",
         "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwYYYh3uuTVGnMD0AuWJGt8Mmsgy4N4E2zIzxAQrYuW2YWcycFKaUvAIWvdt9lm1D3Zr6pM2Voez8esAcA7pqsKYZA9iUxzv/96fx96f",
-        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwEYThPhuTNGt8TnH_WJRrRSz4xntZQCi2BpyVQsYuewaGBmdFObBfRYWvRqowu6WHdlupFhAtL457UBypngriA/96fx96f"
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwEYThPhuTNGt8TnH_WJRrRSz4xntZQCi2BpyVQsYuewaGBmdFObBfRYWvRqowu6WHdlupFhAtL457UBypngriA/96fx96f",
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwEYThPhuTNGt8TnH_WJRrRSz4xntZQCi2BpyVQsYuewaGBmdFObBfRYWvRqowu6WHdlupFhAtL457UBypngriA/96fx96fdpx2x",
+        "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEIUwoUWRLlrTZ8jM3gCPyfDd8Mmsgy4N4HizAyxFQuMeDmaTEwc1SUWPkNBKI_8lG_C38zvp83AIDloesDcFjuqsKYZD2aO7gJ/96fx96fdpx2x"
       ]);
 
       // Steam can serve the same inventory image at different resolutions
