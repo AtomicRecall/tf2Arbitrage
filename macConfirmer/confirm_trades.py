@@ -35,7 +35,7 @@ CONFIRM_BUTTON = (1323, 928)
 # When the connection has timed out, the Steam app shows a retry button here.
 # It is clicked once at the start of every run, before anything else, and is
 # harmless when the button is not showing. Set to None to turn this off.
-TIMEOUT_RETRY_BUTTON = (1321, 849)
+TIMEOUT_RETRY_BUTTON = (1330, 877)
 
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
 # For example: open another tab in the Steam app, then come back to Confirmations.
@@ -230,7 +230,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
         # A timed-out connection leaves a retry button on screen; press it once
         # (a single click, not the doubled one) before refreshing or accepting.
         click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
-        pause(1.0, 2.0, "after the retry button")
+        pause(3.0, 5.0, "after the retry button")
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
     if refresh_mode != "none":
@@ -239,7 +239,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
     for number in range(1, count + 1):
         print(f"Trade {number}/{count}")
         click_checked(clicker, TRADE_OFFER, "the trade offer", check_focus, spread)
-        pause(1.2, 2.4, "for the offer to open")
+        pause(1.2, 4.0, "for the offer to open")
         click_checked(clicker, CONFIRM_BUTTON, "the confirm button", check_focus, spread)
         if number < count:
             # Steam goes back to the list and refreshes it by itself.
