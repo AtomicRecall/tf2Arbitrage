@@ -35,7 +35,13 @@ CONFIRM_BUTTON = (1323, 928)
 # When the connection has timed out, the Steam app shows a retry button here.
 # It is clicked once at the start of every run, before anything else, and is
 # harmless when the button is not showing. Set to None to turn this off.
+<<<<<<< Updated upstream
 TIMEOUT_RETRY_BUTTON = (1330, 877)
+=======
+TIMEOUT_RETRY_BUTTON = (1321, 849)
+# How long to wait after that click: the iPhone takes a while to initialize.
+RETRY_WAIT_SECONDS = (8.0, 10.0)
+>>>>>>> Stashed changes
 
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
 # For example: open another tab in the Steam app, then come back to Confirmations.
@@ -230,7 +236,11 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
         # A timed-out connection leaves a retry button on screen; press it once
         # (a single click, not the doubled one) before refreshing or accepting.
         click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
+<<<<<<< Updated upstream
         pause(3.0, 5.0, "after the retry button")
+=======
+        pause(*RETRY_WAIT_SECONDS, "for the iPhone to reconnect after the retry button")
+>>>>>>> Stashed changes
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
     if refresh_mode != "none":
