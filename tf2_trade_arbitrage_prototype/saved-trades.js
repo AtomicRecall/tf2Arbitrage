@@ -35,8 +35,52 @@
       goodCount:(previous?.goodCount||0)+1,
       lastCheckedAt:result.savedCheck?now:(previous?.lastCheckedAt||null),
       lastStatus:"good",
-      lastNote:""
+      lastNote:"",
+      boughtCount:previous?.boughtCount||0,
+      lastBoughtAt:previous?.lastBoughtAt||null
     };
+    return trim(map);
+  }
+
+  // Hats the bot bought belong in the saved list too: they are the items that
+  // proved to be worth trading. `log` is the purchase log (the Bought tab). The
+  // bought count is recomputed from the log, so running this twice changes
+  // nothing. `onlyKeys` (a Set of keys) limits it to those items.
+  function syncBought(map,log,onlyKeys,now=Date.now()){
+    const byKey=new Map();
+    for(const entry of Array.isArray(log)?log:[]){
+      const key=keyFor(entry?.name);
+      const quantity=Math.floor(Number(entry?.quantity));
+      if(!key||!(quantity>0)||(onlyKeys&&!onlyKeys.has(key)))continue;
+      const row=byKey.get(key)||{count:0,last:null};
+      row.count+=quantity;
+      if(!row.last||(Number(entry.at)||0)>=(Number(row.last.at)||0))row.last=entry;
+      byKey.set(key,row);
+    }
+    for(const [key,row] of byKey){
+      const last=row.last;
+      const at=Number(last.at)||now;
+      const previous=map[key];
+      const scrap=last.source==="scrap.tf";
+      map[key]={
+        name:previous?.name||String(last.name).trim(),
+        source:scrap?"scrap.tf":"stn",
+        sourceHref:scrap?String(last.href||previous?.sourceHref||""):"",
+        scrapValue:scrap?(Number(last.scrapValue)||previous?.scrapValue||null):null,
+        buyPrice:String(last.price||previous?.buyPrice||""),
+        sellPrice:String(previous?.sellPrice||last.sellPrice||""),
+        profitRef:Number.isFinite(previous?.profitRef)?previous.profitRef:(Number.isFinite(last.profitRef)?last.profitRef:null),
+        stock:previous?.stock??null,
+        savedAt:previous?.savedAt||at,
+        lastGoodAt:previous?.lastGoodAt||at,
+        goodCount:previous?.goodCount||0,
+        lastCheckedAt:previous?.lastCheckedAt||null,
+        lastStatus:previous?.lastStatus||"good",
+        lastNote:previous?.lastNote||"",
+        boughtCount:row.count,
+        lastBoughtAt:at
+      };
+    }
     return trim(map);
   }
 
@@ -67,7 +111,7 @@
   function list(map){
     return Object.values(map&&typeof map==="object"?map:{})
       .filter(entry=>entry&&entry.name)
-      .sort((a,b)=>(b.lastGoodAt||0)-(a.lastGoodAt||0));
+      .sort((a,b)=>Math.max(b.lastGoodAt||0,b.lastBoughtAt||0)-Math.max(a.lastGoodAt||0,a.lastBoughtAt||0));
   }
 
   function trim(map){
@@ -78,7 +122,7 @@
     return kept;
   }
 
-  const exported={STORAGE_KEY,MAX_ENTRIES,keyFor,recordGoodTrade,recordCheck,remove,list};
+  const exported={STORAGE_KEY,MAX_ENTRIES,keyFor,recordGoodTrade,recordCheck,syncBought,remove,list};
   if(typeof module!=="undefined"&&module.exports)module.exports=exported;
   else root.TF2SavedTrades=exported;
 })(typeof self!=="undefined"?self:this);

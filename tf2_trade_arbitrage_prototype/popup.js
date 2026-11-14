@@ -608,7 +608,7 @@ function savedStatusText(entry){
   return "";
 }
 function renderSaved(){
-  const entries=Object.values(savedTrades).filter(entry=>entry&&entry.name).sort((a,b)=>(b.lastGoodAt||0)-(a.lastGoodAt||0));
+  const entries=Object.values(savedTrades).filter(entry=>entry&&entry.name).sort((a,b)=>Math.max(b.lastGoodAt||0,b.lastBoughtAt||0)-Math.max(a.lastGoodAt||0,a.lastBoughtAt||0));
   savedCount.textContent=String(entries.length);
   scanSaved.textContent=`Check saved items (${entries.length})`;
   scanSaved.disabled=!entries.length;
@@ -619,7 +619,7 @@ function renderSaved(){
     row.className="saved-row";
     const profit=Number.isFinite(entry.profitRef)?` · +${entry.profitRef.toFixed(2)} ref`:"";
     const savedLink=entry.source==="scrap.tf"?(safeWebUrl(entry.sourceHref)||"https://scrap.tf/buy/hats"):stnItemUrl(entry.name);
-    row.innerHTML=`<div class="saved-name"><span><a href="${esc(savedLink)}" target="_blank" rel="noopener">${esc(entry.name)}</a>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn")}</span><button class="secondary saved-remove" type="button" title="Remove from the saved items">Remove</button></div>`+
+    row.innerHTML=`<div class="saved-name"><span><a href="${esc(savedLink)}" target="_blank" rel="noopener">${esc(entry.name)}</a>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn")}${Number(entry.boughtCount)>0?` <span class="bought-badge" title="Hats the bot bought of this item">Bought ×${Math.floor(Number(entry.boughtCount))}</span>`:""}</span><button class="secondary saved-remove" type="button" title="Remove from the saved items">Remove</button></div>`+
       `<div class="line">Buy ${esc(entry.buyPrice||"?")} → sell ${esc(entry.sellPrice||"?")}${esc(profit)}</div>`+
       `<div class="line reason">${esc(savedStatusText(entry))}</div>`;
     row.querySelector(".saved-remove").onclick=()=>{

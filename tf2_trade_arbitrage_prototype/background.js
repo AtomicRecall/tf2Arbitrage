@@ -1494,16 +1494,47 @@ function recordPurchase(job,quantity,offerId){
     quantity:Math.max(1,Math.floor(Number(quantity))||1),
     source:job.source==="scrap.tf"?"scrap.tf":"stn",
     offerId:String(offerId||""),
-    jobId:job.id
+    jobId:job.id,
+    price:String(job.buyPriceText||""),
+    sellPrice:String(job.sellPriceText||""),
+    profitRef:Number.isFinite(job.profitRef)?job.profitRef:null,
+    href:job.source==="scrap.tf"?String(job.scrapUrl||""):"",
+    scrapValue:job.source==="scrap.tf"?(Number(job.maxScrapValue)||null):null
   };
   purchaseLogChain=purchaseLogChain.then(async()=>{
     const stored=await storageGet({purchaseLog:[]});
     const log=Array.isArray(stored.purchaseLog)?stored.purchaseLog:[];
     log.push(entry);
-    await storageSet({purchaseLog:log.slice(-1000)});
+    const kept=log.slice(-1000);
+    await storageSet({purchaseLog:kept});
+    // A bought hat is saved (again, if it was removed) and counted in the saved list.
+    await syncBoughtIntoSaved(kept,new Set([TF2SavedTrades.keyFor(entry.name)]));
   }).catch(error=>console.warn("Could not record the purchase:",error));
   return purchaseLogChain;
 }
+
+// Puts the hats in the purchase log into the saved list (the "Check saved items"
+// scan). Hats that were bought before this existed are added once at start-up;
+// afterwards only the item just bought is added, so an item the user removed
+// from the saved list stays removed until it is bought again.
+function syncBoughtIntoSaved(log,onlyKeys){
+  savedTradesChain=savedTradesChain.then(async()=>{
+    const key=TF2SavedTrades.STORAGE_KEY;
+    const map=(await storageGet({[key]:{}}))[key]||{};
+    const before=JSON.stringify(map);
+    TF2SavedTrades.syncBought(map,log,onlyKeys);
+    if(JSON.stringify(map)!==before)await storageSet({[key]:map});
+  }).catch(error=>console.warn("Could not save the bought hats:",error));
+  return savedTradesChain;
+}
+(async()=>{
+  try{
+    const stored=await storageGet({purchaseLog:[],boughtSavedBackfill:false});
+    if(stored.boughtSavedBackfill)return;
+    if(Array.isArray(stored.purchaseLog)&&stored.purchaseLog.length)await syncBoughtIntoSaved(stored.purchaseLog,null);
+    await storageSet({boughtSavedBackfill:true});
+  }catch(error){console.warn("Could not save the earlier purchases:",error)}
+})();
 
 async function runTradeQueue(){
   if(tradeWorkerRunning||(!tradeAutomationEnabled&&!tradeAutomationQueue.some(job=>job.forceManual)))return;
@@ -1692,6 +1723,9 @@ function enqueueTradeJob(result,options={}){
     source:fromScrapTf?"scrap.tf":"stn",
     scrapUrl:fromScrapTf?String(result.sourceItem?.href||""):"",
     maxScrapValue:fromScrapTf?Number(result.sourceItem?.scrapValue)||null:null,
+    buyPriceText:String(result.sourceItem?.price||result.buyPrice?.display||""),
+    sellPriceText:String(result.sellPrice?.display||""),
+    profitRef:Number.isFinite(result.profitRef)?result.profitRef:null,
     status:"queued"
   };
   tradeAutomationQueue.push(job);

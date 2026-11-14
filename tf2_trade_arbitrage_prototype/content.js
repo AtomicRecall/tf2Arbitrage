@@ -1480,7 +1480,146 @@
     return {ok:true};
   }
 
+  // ---- already-checked items on the marketplace pages ---------------------------
+  // The "checkedItems" table (see checked-items.js) remembers every item checked
+  // in the last 60 minutes. On the STN and scrap.tf listings those items get a
+  // gray veil and a small countdown on top of them until their 60 minutes are up
+  // (the next scan skips them while their price stays the same).
+  function initCheckedMarkers(){
+    const onScrap=isScrapTf();
+    const onStn=/(?:^|\.)stntrading\.eu$/i.test(location.hostname);
+    if(!onScrap&&!onStn)return;
+    const KEY="checkedItems";
+    const site=onScrap?"scrap.tf":"stn";
+    let table={};
+    let scheduled=false;
+    const norm=text=>String(text||"").trim().replace(/\s+/g," ").toLowerCase();
+
+    if(!document.getElementById("tf2-arb-checked-style")){
+      const style=document.createElement("style");
+      style.id="tf2-arb-checked-style";
+      style.textContent=`
+        .tf2-arb-veil{position:absolute;top:0;right:0;bottom:0;left:0;z-index:5;pointer-events:none;background:rgba(105,105,105,.62);-webkit-backdrop-filter:grayscale(1);backdrop-filter:grayscale(1)}
+        .tf2-arb-timer{position:absolute;top:2px;left:50%;transform:translateX(-50%);z-index:6;pointer-events:none;padding:1px 6px;border:1px solid #111;border-radius:3px;background:rgba(25,25,25,.92);color:#e7a34b;font:bold 10px/14px Tahoma,Verdana,sans-serif;letter-spacing:.2px;white-space:nowrap}`;
+      (document.head||document.documentElement).appendChild(style);
+    }
+
+    function candidateNodes(){
+      return onScrap
+        ?[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")]
+        :[...document.querySelectorAll("a.mp-item-box-wrap")];
+    }
+    function nodeInfo(node){
+      if(onScrap){
+        return {
+          name:scrapItemName(node),
+          price:node.querySelector(".item-value-indicator")?.textContent||""
+        };
+      }
+      return {
+        name:node.querySelector(".item-name")?.textContent||"",
+        price:node.querySelector(".item-price")?.textContent||""
+      };
+    }
+    function timerText(expiresAt){
+      const left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));
+      const minutes=Math.floor(left/60),seconds=left%60;
+      return `Checked · next in ${minutes}:${String(seconds).padStart(2,"0")}`;
+    }
+    function unmark(node){
+      node.classList.remove("tf2-arb-checked");
+      node.querySelector(":scope > .tf2-arb-timer")?.remove();
+      node.querySelector(":scope > .tf2-arb-veil")?.remove();
+      if(node.dataset.tf2ArbSetPosition){
+        node.style.position="";
+        delete node.dataset.tf2ArbSetPosition;
+      }
+      delete node.dataset.tf2ArbExpires;
+    }
+    function mark(node,entry){
+      node.classList.add("tf2-arb-checked");
+      node.dataset.tf2ArbExpires=String(entry.expiresAt);
+      if(getComputedStyle(node).position==="static"){
+        node.style.position="relative";
+        node.dataset.tf2ArbSetPosition="1";
+      }
+      if(!node.querySelector(":scope > .tf2-arb-veil")){
+        const veil=document.createElement("span");
+        veil.className="tf2-arb-veil";
+        node.appendChild(veil);
+      }
+      let badge=node.querySelector(":scope > .tf2-arb-timer");
+      if(!badge){
+        badge=document.createElement("span");
+        badge.className="tf2-arb-timer";
+        badge.appendChild(document.createTextNode(""));
+        node.appendChild(badge);
+      }
+      const text=timerText(entry.expiresAt);
+      if(badge.firstChild.nodeValue!==text)badge.firstChild.nodeValue=text;
+    }
+
+    function apply(){
+      scheduled=false;
+      const now=Date.now();
+      for(const node of candidateNodes()){
+        const info=nodeInfo(node);
+        const entry=table[norm(info.name)];
+        const fresh=entry&&Number(entry.expiresAt)>now&&entry.source===site&&norm(entry.price)===norm(info.price);
+        if(fresh)mark(node,entry);
+        else if(node.classList.contains("tf2-arb-checked"))unmark(node);
+      }
+    }
+    function schedule(){
+      if(scheduled)return;
+      scheduled=true;
+      setTimeout(apply,400);
+    }
+    // Counts down in place without touching the layout.
+    function tick(){
+      const now=Date.now();
+      let expired=false;
+      for(const node of document.querySelectorAll(".tf2-arb-checked")){
+        const expiresAt=Number(node.dataset.tf2ArbExpires);
+        if(!(expiresAt>now)){expired=true;continue}
+        const badge=node.querySelector(":scope > .tf2-arb-timer");
+        const text=timerText(expiresAt);
+        if(badge?.firstChild&&badge.firstChild.nodeValue!==text)badge.firstChild.nodeValue=text;
+      }
+      if(expired)apply();
+    }
+
+    const load=()=>{
+      try{
+        const done=value=>{
+          const stored=value&&value[KEY];
+          table={};
+          if(stored&&typeof stored==="object"){
+            for(const entry of Object.values(stored))if(entry?.name)table[norm(entry.name)]=entry;
+          }
+          schedule();
+        };
+        if(typeof browser!=="undefined")browser.storage.local.get({[KEY]:{}}).then(done).catch(()=>{});
+        else api.storage.local.get({[KEY]:{}},done);
+      }catch(error){console.warn("TF2 Arbitrage: could not read the checked items.",error)}
+    };
+    load();
+    api.storage.onChanged?.addListener((changes,area)=>{
+      if(area!=="local"||!changes[KEY])return;
+      const value=changes[KEY].newValue;
+      table={};
+      if(value&&typeof value==="object"){
+        for(const entry of Object.values(value))if(entry?.name)table[norm(entry.name)]=entry;
+      }
+      schedule();
+    });
+    // The listings are rendered and re-rendered by the page (filters, paging).
+    new MutationObserver(schedule).observe(document.body||document.documentElement,{childList:true,subtree:true});
+    setInterval(tick,1000);
+  }
+
   initTradedOrderMarkers();
+  initCheckedMarkers();
 
   window.addEventListener("tf2mt-arbitrage-purchase-progress", event => {
     let detail;

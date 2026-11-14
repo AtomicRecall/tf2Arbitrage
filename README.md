@@ -150,14 +150,14 @@ offer is sent, `Item_metal_pot_drop.wav` when a scan ends.
 
 Every item the bot checks is remembered for **60 minutes**, together with the price it was checked at
 and the site it was on. A scan skips these items: they still show up as cards marked **Already checked**
-(with how long ago and how many minutes are left), and the **Checked** tab lists them all. An item is
+(with how long ago and how many minutes are left), and the **Checked** tab lists them all. On the STN and scrap.tf pages themselves a checked item is grayed out with a small countdown on top until it is due again. An item is
 checked again as soon as its 60 minutes are up or its price on that site changes. Checks that failed
 (Backpack.tf did not load, a price could not be read) are not remembered, so they are retried.
 *Retry this item* and *Check saved items* always check, and *Forget checked items* clears the memory.
 
 ### Check saved items
 
-Every Good Trade, from STN or scrap.tf, is saved in the browser. **Check saved items** reopens each one
+Every Good Trade, from STN or scrap.tf, and every hat the bot bought is saved in the browser (bought ones carry a **Bought ×N** badge). **Check saved items** reopens each one
 on the site it was found on (its STN page, or the scrap.tf Buy Hats page) and on Backpack.tf and runs
 the normal check again.
 

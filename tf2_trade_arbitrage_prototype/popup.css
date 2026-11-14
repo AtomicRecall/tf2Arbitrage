@@ -48,6 +48,7 @@
 .source-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
 .source-badge.stn{background:linear-gradient(#3b6ea8,#244567)}
 .source-badge.scrap{background:linear-gradient(#a96825,#704719)}
+.bought-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;background:linear-gradient(#5d8f35,#3b5e20);font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
 .checked-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;background:linear-gradient(#6b6b6b,#454545);font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
 .result.already-checked{opacity:.8;border-left-color:#8a8a8a}
 .checked-row{margin:4px 0;padding:6px 8px;background:linear-gradient(90deg,#3a3a3a,#2b2b2b);border:1px solid #111;border-left:3px solid #777}

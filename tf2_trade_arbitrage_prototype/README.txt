@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.114
+Current version 0.7.116
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,12 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.116 changes:
+- Hats the bot bought are part of the saved list ("Check saved items"): every purchase saves the item (again, if it had been removed) with a green "Bought xN" badge, the site it was bought on and its price, and Check saved items re-checks it on that site (STN page or scrap.tf Buy Hats page) and Backpack.tf. Purchases made before this version are added once, the first time the add-on starts.
+
+V0.7.115 changes:
+- Checked items are grayed out on the stntrading.eu and scrap.tf listings themselves: a gray veil over the item and a small "Checked - next in M:SS" countdown on top of it, for as long as the item is inside its 60 minutes at the price it was checked at. The marks appear as soon as the check is stored, follow the page when it re-renders, and disappear when the timer runs out or the price changes. The items stay clickable.
 
 V0.7.114 changes:
 - New "already checked" table (storage key checkedItems, next to savedTrades). Every conclusive check stores the item, the price it was checked at, the site (STN or scrap.tf) and a 60-minute timer. Failed checks (Backpack.tf did not load, a price could not be read) are not stored, so they are tried again.
