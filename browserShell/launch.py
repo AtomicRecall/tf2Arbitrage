@@ -50,7 +50,7 @@ STN_HATS_URL = (
 # scrap.tf's Buy Hats page (it needs a Steam login). Both pages are opened as
 # tabs on start (and are the home page, separated by "|"); "Scan current page"
 # works on whichever tab is in front.
-SCRAP_HATS_URL = "https://scrap.tf/hats"
+SCRAP_HATS_URL = "https://scrap.tf/buy/hats"
 HOME_URL = f"{STN_HATS_URL}|{SCRAP_HATS_URL}"
 
 # Release Firefox refuses unsigned add-ons; these builds can run them.

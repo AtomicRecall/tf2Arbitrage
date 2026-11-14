@@ -38,7 +38,7 @@ Close Firefox to stop everything.
 ## Scanning and buying on scrap.tf
 
 Everything that works on Windows works the same here: the add-on is the same code, only the browser
-and the confirmer are different. To use scrap.tf, keep its tab (`https://scrap.tf/hats`, signed in to
+and the confirmer are different. To use scrap.tf, keep its tab (`https://scrap.tf/buy/hats`, signed in to
 Steam) open next to the STN tab and press **Scan STN + scrap.tf pages** in the sidebar (both sites are scanned together; the **Bought** tab counts what was bought and where). With "Automatically buy items and send bot offers"
 on, a Good Trade is bought on scrap.tf (item selected, cart button pressed, the Steam offer scrap.tf
 sends is accepted), and the Mac confirmer then approves the mobile confirmation like it does for STN.

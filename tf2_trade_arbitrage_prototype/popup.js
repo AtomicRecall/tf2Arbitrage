@@ -384,7 +384,7 @@ function hydrate(state){
   if(state?.running) status.textContent=`Checking ${state.checked||0} / ${state.total||0} items...`;
   else if(state?.finished) status.textContent=`Finished: ${state.checked||0} / ${state.total||0} items checked — ${dealCount} hits found.`;
   else if(state?.checked) status.textContent=`Paused/stopped: ${state.checked} / ${state.total} checked — ${dealCount} hits found.`;
-  else status.textContent="Open stntrading.eu and/or scrap.tf/hats first (both are scanned together).";
+  else status.textContent="Open stntrading.eu and/or scrap.tf/buy/hats first (both are scanned together).";
 }
 
 (async()=>{

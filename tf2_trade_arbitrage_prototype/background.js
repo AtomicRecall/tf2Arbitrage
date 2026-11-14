@@ -831,6 +831,7 @@ async function openStnPurchaseBatch(job,batchNumber,remaining){
 // presses the cart button, then waits until scrap.tf's bot has sent its Steam
 // trade offer (the "Your trade is ready!" panel) and returns that offer. The
 // offer is then accepted and verified exactly like an STN purchase offer.
+const SCRAP_BUY_URL="https://scrap.tf/buy/hats";
 const SCRAP_QUEUE_TIMEOUT_MS=360000;
 const SCRAP_IDLE_TIMEOUT_MS=60000;
 
@@ -840,10 +841,8 @@ async function cancelScrapQueue(tabId){
 }
 
 async function openScrapPurchaseBatch(job,batchNumber,remaining,apiKey){
-  let pageUrl=null;
-  try{pageUrl=new URL(String(job.scrapUrl||""))}catch(error){}
-  if(!pageUrl||!/(?:^|\.)scrap\.tf$/i.test(pageUrl.hostname))pageUrl=new URL("https://scrap.tf/hats");
-  pageUrl.hash="";
+  // Purchases always happen on the Buy Hats page.
+  const pageUrl=new URL(SCRAP_BUY_URL);
   // The offers Steam already lists, in case the offer id cannot be read from
   // the scrap.tf page itself.
   const knownOffers=new Set();
@@ -2388,6 +2387,24 @@ async function refreshItemFromStn(item){
   }
 }
 
+// Alternates the sites (STN, scrap.tf, STN, scrap.tf, ...) so both are worked
+// through side by side instead of one site being finished before the other
+// starts. Each site keeps its own order.
+function interleaveBySource(items){
+  const lanes=new Map();
+  for(const item of items){
+    const source=item.source==="scrap.tf"?"scrap.tf":"stn";
+    if(!lanes.has(source))lanes.set(source,[]);
+    lanes.get(source).push(item);
+  }
+  const ordered=[];
+  const lists=[...lanes.values()];
+  for(let index=0;lists.some(list=>index<list.length);index++){
+    for(const list of lists)if(index<list.length)ordered.push(list[index]);
+  }
+  return ordered;
+}
+
 // The marketplace tab each source (STN, scrap.tf) was read from in this scan.
 let sourceTabsBySource={};
 async function highlightSourceItem(itemName,source){
@@ -3015,7 +3032,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       if(!found.length){
         sendResponse({ok:false,error:craftSkipped
           ?"Only Craft Hats were found on the scrap.tf page and they are skipped (see the checkbox in the popup)."
-          :"No TF2 marketplace items found. Open stntrading.eu and/or scrap.tf/hats first."});
+          :"No TF2 marketplace items found. Open stntrading.eu and/or scrap.tf/buy/hats first."});
         return;
       }
       // An item listed on both sites is checked once, at the cheaper price: that
@@ -3041,7 +3058,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
-      queue=items;total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
+      queue=interleaveBySource(items);total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources});
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
