@@ -1416,8 +1416,9 @@ async function executeTradeJob(job){
         }
       }
       emitTradeAutomationStatus(`${sellerLabel} batch ${batchNumber}: ${sellerLabel} created Steam offer #${stnOfferIdFromUrl(purchaseBatch.offerUrl.href)} for ${purchaseBatch.amount} ${job.name}. Opening it now…`);
-      await acceptStnPurchaseBatch(job,batchNumber,purchaseBatch.amount,purchaseBatch.offerUrl,steamApiKey);
+      const acceptedOfferId=await acceptStnPurchaseBatch(job,batchNumber,purchaseBatch.amount,purchaseBatch.offerUrl,steamApiKey);
       job.purchasedQuantity+=purchaseBatch.amount;
+      recordPurchase(job,purchaseBatch.amount,acceptedOfferId);
       // (The middle1/middle2 sound for this trade already played when the
       // accept went through, inside acceptStnPurchaseBatch.)
       emitTradeAutomationStatus(`Confirmed ${sellerLabel} batch ${batchNumber}: Steam Web API state 3 accepted ${job.purchasedQuantity}/${job.quantity} ${job.name} item${job.purchasedQuantity===1?"":"s"}.`);
@@ -1466,6 +1467,27 @@ async function executeTradeJob(job){
       transactionTabIds.delete(tab.id);
     }));
   }
+}
+
+// Every accepted purchase is kept (browser storage, key purchaseLog) so the
+// popup's Bought tab can show how many hats were grabbed and from where.
+let purchaseLogChain=Promise.resolve();
+function recordPurchase(job,quantity,offerId){
+  const entry={
+    at:Date.now(),
+    name:job.name,
+    quantity:Math.max(1,Math.floor(Number(quantity))||1),
+    source:job.source==="scrap.tf"?"scrap.tf":"stn",
+    offerId:String(offerId||""),
+    jobId:job.id
+  };
+  purchaseLogChain=purchaseLogChain.then(async()=>{
+    const stored=await storageGet({purchaseLog:[]});
+    const log=Array.isArray(stored.purchaseLog)?stored.purchaseLog:[];
+    log.push(entry);
+    await storageSet({purchaseLog:log.slice(-1000)});
+  }).catch(error=>console.warn("Could not record the purchase:",error));
+  return purchaseLogChain;
 }
 
 async function runTradeQueue(){
@@ -2366,10 +2388,13 @@ async function refreshItemFromStn(item){
   }
 }
 
-async function highlightSourceItem(itemName){
-  if(!Number.isInteger(sourceTabId))return;
+// The marketplace tab each source (STN, scrap.tf) was read from in this scan.
+let sourceTabsBySource={};
+async function highlightSourceItem(itemName,source){
+  const tabId=Number.isInteger(sourceTabsBySource[source])?sourceTabsBySource[source]:sourceTabId;
+  if(!Number.isInteger(tabId))return;
   try{
-    await msgTab(sourceTabId,{type:"HIGHLIGHT_MARKET_ITEM",itemName});
+    await msgTab(tabId,{type:"HIGHLIGHT_MARKET_ITEM",itemName});
   }catch(e){}
 }
 
@@ -2864,7 +2889,7 @@ async function next(){
   }
 
   const firstName=item.name;
-  await highlightSourceItem(firstName);
+  await highlightSourceItem(firstName,item.source);
   const originalSpec=getBackpackSpec(firstName);
   const namesToTry=[];
   const addName=n=>{
@@ -2966,17 +2991,49 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
     qTabs({active:true,currentWindow:true}).then(async tabs=>{
       const tab=tabs[0];
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
-      const page=await msgTab(tab.id,{type:"READ_BUY_PAGE"}).catch(()=>null);
-      if(!page?.items?.length){sendResponse({ok:false,error:"No TF2 marketplace items found on this page."});return}
-      let items=page.items;
-      if(items.some(i=>i.source==="scrap.tf")){
-        // The Craft Hats section is hundreds of 1.77 ref hats that Backpack.tf
-        // buyers never pay that much for; skipping it saves most of the scan.
-        const pref=await storageGet({scrapSkipCraft:true});
-        if(pref.scrapSkipCraft!==false)items=items.filter(i=>i.category!=="Craft Hats");
-        if(!items.length){sendResponse({ok:false,error:"Only Craft Hats were found on this scrap.tf page and they are skipped (see the checkbox in the popup)."});return}
-      }
       keyRate=+m.keyRate||63;
+      // Every STN and scrap.tf page open in this window is read (the active tab
+      // first), so both marketplaces are checked in one scan.
+      const marketplacePage=/^https:\/\/(?:www\.)?(?:stntrading\.eu|scrap\.tf)\//i;
+      const windowTabs=await qTabs({windowId:tab.windowId}).catch(()=>[tab]);
+      const pageTabs=[tab,...windowTabs.filter(other=>other.id!==tab.id&&marketplacePage.test(String(other.url||"")))];
+      // The Craft Hats section is hundreds of 1.77 ref hats that Backpack.tf
+      // buyers never pay that much for; skipping it saves most of the scan.
+      const skipCraft=(await storageGet({scrapSkipCraft:true})).scrapSkipCraft!==false;
+      const found=[];
+      const tabsBySource={};
+      let craftSkipped=0;
+      for(const pageTab of pageTabs){
+        const page=await msgTab(pageTab.id,{type:"READ_BUY_PAGE"}).catch(()=>null);
+        for(const entry of page?.items||[]){
+          const source=entry.source==="scrap.tf"?"scrap.tf":"stn";
+          if(source==="scrap.tf"&&skipCraft&&entry.category==="Craft Hats"){craftSkipped++;continue}
+          found.push({...entry,source});
+          if(!Number.isInteger(tabsBySource[source]))tabsBySource[source]=pageTab.id;
+        }
+      }
+      if(!found.length){
+        sendResponse({ok:false,error:craftSkipped
+          ?"Only Craft Hats were found on the scrap.tf page and they are skipped (see the checkbox in the popup)."
+          :"No TF2 marketplace items found. Open stntrading.eu and/or scrap.tf/hats first."});
+        return;
+      }
+      // An item listed on both sites is checked once, at the cheaper price: that
+      // is the one worth buying.
+      const cheapest=new Map();
+      for(const entry of found){
+        const spec=getBackpackSpec(entry.name);
+        const key=`${spec.quality}|${spec.craftability}|${normalizeTradeItemName(spec.itemName)}`;
+        const current=cheapest.get(key);
+        if(!current){cheapest.set(key,entry);continue}
+        const price=parsePrice(entry.price)?.refValue;
+        const currentPrice=parsePrice(current.price)?.refValue;
+        if(Number.isFinite(price)&&(!Number.isFinite(currentPrice)||price<currentPrice))cheapest.set(key,entry);
+      }
+      const items=[...cheapest.values()];
+      const sources={};
+      for(const entry of items)sources[entry.source]=(sources[entry.source]||0)+1;
+      sourceTabsBySource=tabsBySource;
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
@@ -2986,7 +3043,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       }
       queue=items;total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
-      sendResponse({ok:true,total});
+      sendResponse({ok:true,total,sources});
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
       next();
     });

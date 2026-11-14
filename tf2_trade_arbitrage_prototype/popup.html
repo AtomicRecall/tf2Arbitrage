@@ -56,7 +56,7 @@
     <div id="macStatus" class="api-key-status" role="status" aria-live="polite">Not configured.</div>
   </details>
   <div class="hint">STN purchase completion is verified through the Steam Web API for the exact offer ID. Only trade_offer_state 3 (Accepted) counts as complete; state 9 (CreatedNeedsConfirmation) and state 11 (InEscrow) do not. Approve mobile confirmations yourself. Acceptance of outgoing bot offers is not tracked.</div>
-  <button id="scan">Scan current page</button>
+  <button id="scan" title="Reads every stntrading.eu and scrap.tf page open in this window">Scan STN + scrap.tf pages</button>
   <button id="stop" class="secondary">Stop</button>
   <label class="automation-toggle">
     <input id="scrapSkipCraft" type="checkbox" checked>
@@ -71,7 +71,7 @@
   </details>
   <div class="hint">Progress is saved automatically when this popup closes. Dismissed items stay dismissed until restored.</div>
   <div class="hint">Backpack.tf scan pages, Steam offer checks, STN purchases and the Steam offers that follow them open in a separate “TF2 Arbitrage Scanner” window that closes when everything is finished. Scanning pauses while a trade runs in it. Keep it open and visible (not minimized); your main window is left alone, except for the Backpack.tf pages that are highlighted for you.</div>
-  <div id="status">Open your TF2 marketplace page (stntrading.eu, or scrap.tf/buy/hats) first.</div>
+  <div id="status">Open stntrading.eu and/or scrap.tf/hats first (both are scanned together).</div>
   <div class="summary">
     <div><b id="total">0</b><span>items</span></div>
     <div><b id="checked">0</b><span>checked</span></div>
@@ -85,10 +85,12 @@
     <button class="tab" data-filter="notfound" role="tab">Not Found <span id="tabNotFound">0</span></button>
     <button class="tab" data-filter="dismissed" role="tab">Dismissed <span id="tabDismissed">0</span></button>
     <button class="tab" data-filter="traders" role="tab">Traders <span id="tabTraders">0</span></button>
+    <button class="tab" data-filter="bought" role="tab">Bought <span id="tabBought">0</span></button>
   </div>
   <div id="results"></div>
   <div id="unverifiedResults" hidden></div>
   <div id="tradersView" hidden></div>
+  <div id="boughtView" hidden></div>
   <script src="popup.js"></script>
 </body>
 </html>

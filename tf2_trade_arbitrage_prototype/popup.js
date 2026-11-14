@@ -5,11 +5,13 @@ if(new URLSearchParams(location.search).get("mode")==="sidebar")document.documen
 const $=id=>document.getElementById(id);
 const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
+const boughtView=$("boughtView"),tabBought=$("tabBought");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
 let dismissedItems=new Set();
 let traderHistory={};
+let purchaseLog=[];
 let steamApiKeyConfigured=false;
 
 const DEFAULT_VOLUME=0.4;
@@ -183,7 +185,7 @@ function renderResult(r,prepend=true){
   const attempts=Array.isArray(r.attempts)?r.attempts:[];
   const offerChecks=Array.isArray(r.offerChecks)?r.offerChecks:[];
   const verifiedOfferCount=offerChecks.filter(entry=>entry.verification?.status==="sufficient").length;
-  let html=`<div class="result-top"><div class="name">${esc(r.name)}</div><button class="dismiss-item" title="Dismiss this item">${dismissed?"Restore":"Dismiss"}</button></div>`;
+  let html=`<div class="result-top"><div class="name">${esc(r.name)}${sourceBadge(r.source||r.sourceItem?.source)}</div><button class="dismiss-item" title="Dismiss this item">${dismissed?"Restore":"Dismiss"}</button></div>`;
   if(r.skipped){
     html+=`<div class="line reason">${esc(r.reason)}</div>`;
   }else{
@@ -297,14 +299,17 @@ function updateTabCounts(){
   tabNotFound.textContent=notfound;
   tabDismissed.textContent=dismissed;
   tabTraders.textContent=String(Object.values(traderHistory).filter(entry=>Number(entry?.count)>0).length);
+  tabBought.textContent=String(boughtTotals().total);
 }
 function applyFilter(){
   const showTraders=activeFilter==="traders";
   const showUnverified=activeFilter==="unverified";
-  results.hidden=showTraders||showUnverified;
-  unverifiedResults.hidden=showTraders||!showUnverified;
+  const showBought=activeFilter==="bought";
+  results.hidden=showTraders||showUnverified||showBought;
+  unverifiedResults.hidden=showTraders||showBought||!showUnverified;
   tradersView.hidden=!showTraders;
-  if(showTraders||showUnverified){
+  boughtView.hidden=!showBought;
+  if(showTraders||showUnverified||showBought){
     unverifiedResults.querySelectorAll(".result").forEach(card=>{
       card.style.display=isDismissed(card.dataset.key)?"none":"";
     });
@@ -379,7 +384,7 @@ function hydrate(state){
   if(state?.running) status.textContent=`Checking ${state.checked||0} / ${state.total||0} items...`;
   else if(state?.finished) status.textContent=`Finished: ${state.checked||0} / ${state.total||0} items checked — ${dealCount} hits found.`;
   else if(state?.checked) status.textContent=`Paused/stopped: ${state.checked} / ${state.total} checked — ${dealCount} hits found.`;
-  else status.textContent="Open your TF2 marketplace page first.";
+  else status.textContent="Open stntrading.eu and/or scrap.tf/hats first (both are scanned together).";
 }
 
 (async()=>{
@@ -553,7 +558,8 @@ async function startScan(type){
   checked.textContent="0";
   deals.textContent="0";
   total.textContent=r.total;
-  status.textContent=`Checking 0 / ${r.total} items...`;
+  const sourceText=Object.entries(r.sources||{}).map(([name,count])=>`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
+  status.textContent=`Checking 0 / ${r.total} items${sourceText?` (${sourceText})`:""}...`;
 }
 stop.onclick=async()=>{await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`};
 
@@ -627,4 +633,70 @@ api.storage.onChanged?.addListener((changes,area)=>{
   const value=changes[SAVED_KEY].newValue;
   savedTrades=value&&typeof value==="object"?value:{};
   renderSaved();
+});
+
+// ---- Source badge and the Bought tab -----------------------------------------
+function sourceLabel(source){return source==="scrap.tf"?"scrap.tf":"STN"}
+function sourceBadge(source){
+  if(!source)return "";
+  return ` <span class="source-badge ${source==="scrap.tf"?"scrap":"stn"}">${esc(sourceLabel(source))}</span>`;
+}
+function boughtEntries(){
+  return (Array.isArray(purchaseLog)?purchaseLog:[]).filter(entry=>entry&&entry.name&&Number(entry.quantity)>0);
+}
+function boughtTotals(){
+  const totals={total:0,stn:{hats:0,trades:0},scrap:{hats:0,trades:0}};
+  for(const entry of boughtEntries()){
+    const bucket=entry.source==="scrap.tf"?totals.scrap:totals.stn;
+    bucket.hats+=Math.floor(Number(entry.quantity));
+    bucket.trades++;
+  }
+  totals.total=totals.stn.hats+totals.scrap.hats;
+  return totals;
+}
+function renderBought(){
+  if(!boughtView)return;
+  const entries=boughtEntries();
+  const totals=boughtTotals();
+  tabBought.textContent=String(totals.total);
+  if(!entries.length){
+    boughtView.innerHTML='<div class="trader-empty">Nothing bought yet. Every hat the bot buys is counted here, with the site it came from (STN or scrap.tf).</div>';
+    return;
+  }
+  const items=new Map();
+  for(const entry of entries){
+    const key=itemKey(entry.name);
+    const row=items.get(key)||{name:entry.name,stn:0,scrap:0,last:0};
+    row[entry.source==="scrap.tf"?"scrap":"stn"]+=Math.floor(Number(entry.quantity));
+    row.last=Math.max(row.last,Number(entry.at)||0);
+    items.set(key,row);
+  }
+  const itemRows=[...items.values()].sort((a,b)=>b.last-a.last).map(row=>
+    `<div class="bought-row"><div class="bought-name">${esc(row.name)}</div><div class="bought-split">${row.stn?`<span class="source-badge stn">STN ×${row.stn}</span>`:""}${row.scrap?`<span class="source-badge scrap">scrap.tf ×${row.scrap}</span>`:""}</div></div>`
+  ).join("");
+  const recentRows=entries.slice(-30).reverse().map(entry=>{
+    const when=Number(entry.at)>0?new Date(Number(entry.at)).toLocaleString():"";
+    return `<div class="bought-recent"><span>${esc(when)}</span><span>${esc(entry.name)} ×${Math.floor(Number(entry.quantity))}</span>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn").trim()}${entry.offerId?`<small>#${esc(entry.offerId)}</small>`:""}</div>`;
+  }).join("");
+  boughtView.innerHTML=
+    `<div class="bought-summary">`+
+      `<div><b>${totals.total}</b><span>hats bought</span></div>`+
+      `<div class="from-stn"><b>${totals.stn.hats}</b><span>from STN · ${totals.stn.trades} trade${totals.stn.trades===1?"":"s"}</span></div>`+
+      `<div class="from-scrap"><b>${totals.scrap.hats}</b><span>from scrap.tf · ${totals.scrap.trades} trade${totals.scrap.trades===1?"":"s"}</span></div>`+
+    `</div>`+
+    `<div class="debug-title">By item</div>${itemRows}`+
+    `<div class="debug-title">Latest purchases</div>${recentRows}`+
+    `<button id="clearBought" class="secondary" type="button">Clear bought history</button>`;
+  boughtView.querySelector("#clearBought").onclick=()=>{
+    if(!window.confirm("Clear the bought history? This only resets these counters."))return;
+    purchaseLog=[];
+    renderBought();
+    api.storage.local.set({purchaseLog:[]});
+  };
+}
+api.storage.local.get({purchaseLog:[]},v=>{purchaseLog=Array.isArray(v.purchaseLog)?v.purchaseLog:[];renderBought()});
+api.storage.onChanged?.addListener((changes,area)=>{
+  if(area!=="local"||!changes.purchaseLog)return;
+  purchaseLog=Array.isArray(changes.purchaseLog.newValue)?changes.purchaseLog.newValue:[];
+  renderBought();
 });

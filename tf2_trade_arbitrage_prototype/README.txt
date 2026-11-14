@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.110
+Current version 0.7.111
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,11 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.111 changes:
+- STN and scrap.tf are scanned together. "Scan STN + scrap.tf pages" reads every stntrading.eu and scrap.tf page open in the window (the active tab first), not only the active tab. An item listed on both is checked once, at the cheaper price, and each result card shows which site it is from (STN / scrap.tf badge). The scan status says how many items came from each site.
+- New "Bought" tab: every accepted purchase is logged (browser storage, key purchaseLog, last 1000) with the site it came from. The tab shows the total number of hats bought, the split between STN and scrap.tf (hats and trades), a by-item breakdown and the latest purchases with their Steam offer numbers. "Clear bought history" resets it.
+- The page highlight for the item being checked now goes to the tab of the site the item came from.
 
 V0.7.110 changes:
 - scrap.tf purchases. With "Automatically buy items and send bot offers" on, a Good Trade found on scrap.tf is bought there instead of on STN: the scrap.tf tab is opened, the item is clicked once per copy wanted, the cart button (#trade-btn, ScrapTF.Hats.BuyWithMetal) is pressed and the add-on waits for scrap.tf's "Your trade is ready!" panel. The Steam offer it names (ScrapTF.NewQueue.TradeOfferID, what "Open Trade Offer" would open) is then opened in the scanner window and accepted by TF2 Metal Trader, the Steam Web API must report it Accepted (state 3), the Mac confirmer handles the mobile confirmation, and only then are the bot offers sent to the Backpack.tf buyers, exactly as for STN.
