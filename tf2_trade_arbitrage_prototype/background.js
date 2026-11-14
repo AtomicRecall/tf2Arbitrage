@@ -673,7 +673,18 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
   const acceptedByPage=()=>job.purchaseAcceptedOfferId===String(offerId);
   // Accepting an STN offer also needs the Steam Mobile confirmation. This entry
   // lets the Mac confirmer handle it the same way as a sent bot offer.
-  const macEntry={offerId:String(offerId),needsConfirmation:false};
+  const macEntry={
+    offerId:String(offerId),
+    needsConfirmation:false,
+    label:job.source==="scrap.tf"?"the scrap.tf purchase":"the STN purchase"
+  };
+  // The offer page says Steam is waiting for the mobile confirmation. Either of
+  // its two reports counts: the final "accepted, needs confirmation" event, or
+  // the earlier progress step (which is enough even if the final event is lost).
+  const pageNeedsMobile=()=>
+    job.purchaseNeedsConfirmationOfferId===String(offerId)||
+    (job.purchasePageProgress?.phase==="mobile-confirmation-pending"&&String(job.purchasePageProgress.offerId)===String(offerId));
+  let askedForPageSignal=false;
   const askMac=async(waitingForConfirmation)=>{
     macEntry.needsConfirmation=waitingForConfirmation;
     if(!waitingForConfirmation)return;
@@ -682,7 +693,7 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
   // Sleeps between API polls but wakes at once when the page reports acceptance.
   const pollPause=async()=>{
     const until=Date.now()+STEAM_TRADE_OFFER_POLL_MS;
-    while(Date.now()<until&&!acceptedByPage())await sleep(200);
+    while(Date.now()<until&&!acceptedByPage()&&!(pageNeedsMobile()&&!askedForPageSignal))await sleep(200);
   };
 
   while(Date.now()<deadline){
@@ -692,7 +703,10 @@ async function waitForSteamOfferAccepted(job,offerId,apiKey,timeoutMs=STEAM_TRAD
     }
     // The offer page said Steam needs the mobile confirmation: ask the Mac now,
     // without waiting for the lagging Web API to show state 9.
-    if(job.purchaseNeedsConfirmationOfferId===String(offerId))await askMac(true);
+    if(pageNeedsMobile()){
+      askedForPageSignal=true;
+      await askMac(true);
+    }
     let offers;
     try{
       offers=await fetchSteamReceivedOffers(apiKey);
@@ -1173,9 +1187,10 @@ async function requestMacConfirmations(entries=[...trackedBotOffers.values()]){
       const {status,payload}=await macConfirmerFetch(settings,"/confirm",{offerIds:ids,retry});
       if(status===202||status===200){
         for(const entry of group){entry.macRequestedAt=Date.now();entry.macRequests=(entry.macRequests||0)+1;entry.macErrors=0}
+        const labelText=[...new Set(group.map(entry=>entry.label).filter(Boolean))].join(" and ");
         emitTradeAutomationStatus(payload?.duplicate
           ?`The Mac already has offer${ids.length===1?"":"s"} ${ids.map(id=>`#${id}`).join(", ")} queued.`
-          :`Asked the Mac to confirm ${ids.length} offer${ids.length===1?"":"s"} (${ids.map(id=>`#${id}`).join(", ")})${retry?" again":""}.${payload?.dryRun?" The Mac server is in DRY RUN mode, so nothing will be clicked; start the browser without --server-dry-run.":""}`);
+          :`Asked the Mac to confirm ${ids.length} offer${ids.length===1?"":"s"} (${ids.map(id=>`#${id}`).join(", ")}${labelText?`, ${labelText}`:""})${retry?" again":""}.${payload?.dryRun?" The Mac server is in DRY RUN mode, so nothing will be clicked; start the browser without --server-dry-run.":""}`);
         continue;
       }
       throw new Error(payload?.error||`the Mac server answered HTTP ${status}`);
@@ -2011,8 +2026,8 @@ function playHitSound(){
   }catch(e){}
 }
 // Trade sounds (hit.mp3, which announces a deal, is played elsewhere):
-//   middle1.wav after each STN trade when more STN bot trades are still coming
-//   middle2.wav after the last STN trade, and after the last Backpack.tf offer
+//   middle1.wav after each STN / scrap.tf trade when more of that purchase is still coming
+//   middle2.wav after the last STN / scrap.tf trade, and after the last Backpack.tf offer
 // The volume slider's saved value is read each time, so these sounds follow the
 // slider even if the background script was restarted since it was moved.
 async function playTradeMilestoneSound(file){

@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.112
+Current version 0.7.113
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,11 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.113 changes:
+- scrap.tf purchases use the same accept / Mac-confirm / sound steps as STN purchases: the Steam offer scrap.tf creates is accepted by TF2 Metal Trader, the Mac confirmer is asked to approve the mobile confirmation, middle1.wav plays when the accept goes through and more of the purchase is still to come, middle2.wav when it was the last (and again after the last Backpack.tf offer is sent), hit.mp3 announces the deal and the end sound closes the scan.
+- The Mac is now asked as soon as the offer page reports it is waiting for the mobile confirmation (either its "accepted, needs confirmation" report or the earlier "mobile confirmation pending" step), instead of only when the final report arrives or the Steam Web API shows state 9. Both STN and scrap.tf purchases benefit.
+- The status line says which purchase the Mac was asked about ("the scrap.tf purchase" / "the STN purchase").
 
 V0.7.112 changes:
 - The STN and scrap.tf items of one scan are now checked alternately (STN, scrap.tf, STN, scrap.tf, ...) instead of all of one site first. The Backpack.tf checks still run one item at a time (the scanner window is shared and Backpack.tf rate-limits), so this interleaves the two sites rather than running two checks at the exact same moment.
