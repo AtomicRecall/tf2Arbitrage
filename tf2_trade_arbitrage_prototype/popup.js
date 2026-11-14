@@ -8,6 +8,7 @@ const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
 const scanReverse=$("scanReverse"),tabReverse=$("tabReverse");
+const scanStn=$("scanStn"),scanScrap=$("scanScrap");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
@@ -581,12 +582,14 @@ volume.oninput=()=>{
   send({type:"SET_VOLUME",volume:v/100});
 };
 
-scan.onclick=()=>startScan("START_SCAN");
+scan.onclick=()=>startScan("START_SCAN",{sites:"all"});
+scanStn.onclick=()=>startScan("START_SCAN",{sites:"stn"});
+scanScrap.onclick=()=>startScan("START_SCAN",{sites:"scrap.tf"});
 scanSaved.onclick=()=>startScan("START_SAVED_SCAN");
 scanReverse.onclick=()=>startScan("START_REVERSE_SCAN");
-async function startScan(type){
+async function startScan(type,extra={}){
   api.storage.local.set({keyRate:+rate.value||63});
-  const r=await send({type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
+  const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
   if(!r?.ok){status.textContent=r?.error||"Could not start scan.";return}
   results.innerHTML="";
   unverifiedResults.innerHTML="";
@@ -596,7 +599,7 @@ async function startScan(type){
   checked.textContent=String(r.alreadyChecked||0);
   deals.textContent="0";
   total.textContent=r.total;
-  const sourceText=Object.entries(r.sources||{}).map(([name,count])=>`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
+  const sourceText=Object.entries(r.sources||{}).map(([name,count])=>name==="stn-reverse"?`${count} STN buy-price checks`:`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
   status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
 stop.onclick=async()=>{await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`};
@@ -737,11 +740,9 @@ api.storage.local.get({purchaseLog:[]},v=>{purchaseLog=Array.isArray(v.purchaseL
 
 // ---- Already checked items (the 60-minute table kept by background.js) ------------
 const CHECKED_KEY="checkedItems";
+// One row per item with its fresh directions (see checked-items.js).
 function checkedEntries(){
-  const now=Date.now();
-  return Object.values(checkedItems&&typeof checkedItems==="object"?checkedItems:{})
-    .filter(entry=>entry&&entry.name&&Number(entry.expiresAt)>now)
-    .sort((a,b)=>a.expiresAt-b.expiresAt);
+  return TF2CheckedItems.list(checkedItems&&typeof checkedItems==="object"?checkedItems:{});
 }
 function minutesLeft(entry){return Math.max(1,Math.ceil((Number(entry.expiresAt)-Date.now())/60000))}
 function checkedOutcomeText(entry){
@@ -758,9 +759,15 @@ function renderChecked(){
     return;
   }
   const rows=entries.map(entry=>{
-    const when=new Date(Number(entry.checkedAt)).toLocaleTimeString();
-    return `<div class="checked-row ${esc(entry.outcome||"")}"><div class="checked-top"><span class="checked-name">${esc(entry.name)}</span>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn").trim()}<span class="checked-timer">${minutesLeft(entry)} min left</span></div>`+
-      `<div class="line">Checked at ${esc(entry.price||"?")} · ${esc(checkedOutcomeText(entry))} · ${esc(when)}</div></div>`;
+    const scrap=entry.source==="scrap.tf";
+    const full=scrap?Boolean(entry.forward):Boolean(entry.forward&&entry.reverse);
+    const lines=["forward","reverse"].filter(direction=>entry[direction]).map(direction=>{
+      const block=entry[direction];
+      const label=direction==="forward"?`Buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf`:"Buy on Backpack.tf, sell to STN";
+      return `<div class="line">${esc(label)}: at ${esc(block.price||"?")} · ${esc(checkedOutcomeText(block))} · ${esc(new Date(Number(block.checkedAt)).toLocaleTimeString())} · ${Math.max(1,Math.ceil((block.expiresAt-Date.now())/60000))} min left</div>`;
+    }).join("");
+    const missing=full?"":`<div class="small">${entry.forward?"Not yet checked: buy on Backpack.tf, sell to STN.":`Not yet checked: buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf.`}</div>`;
+    return `<div class="checked-row ${esc(entry.outcome||"")}"><div class="checked-top"><span class="checked-name">${esc(entry.name)}</span>${sourceBadge(scrap?"scrap.tf":"stn").trim()}<span class="checked-timer">${full?"Fully checked":"Half checked"} · ${minutesLeft(entry)} min left</span></div>`+lines+missing+`</div>`;
   }).join("");
   checkedView.innerHTML=
     `<div class="hint">Skipped by scans for 60 minutes after a check, unless the price changes. "Retry this item" on a card checks it again right away.</div>`+

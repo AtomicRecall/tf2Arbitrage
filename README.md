@@ -111,7 +111,10 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
 1. Open **`stntrading.eu`** (the hats listing) and/or **`scrap.tf/buy/hats`** in the same window
    (scrap.tf needs you signed in).
 2. Press **Scan STN + scrap.tf pages**. Every STN and scrap.tf page open in the window is read, and
-   the two sites are checked alternately. A separate **TF2 Arbitrage Scanner** window opens for the
+   the two sites are checked alternately. Every STN hat is checked **both ways**: buy on STN and sell
+   on Backpack.tf, and buy on Backpack.tf and sell to STN (see the reverse scan below). scrap.tf hats are
+   checked buying on scrap.tf. **Scan STN only** and **Scan scrap.tf only** run the same scan on just that
+   site's page(s). A separate **TF2 Arbitrage Scanner** window opens for the
    Backpack.tf and Steam pages and closes when the work is done. Keep it open and visible.
 3. Watch the result tabs:
 
@@ -159,7 +162,11 @@ offer is sent, `Item_metal_pot_drop.wav` when a scan ends.
 
 Every item the bot checks is remembered for **60 minutes**, together with the price it was checked at
 and the site it was on. A scan skips these items: they still show up as cards marked **Already checked**
-(with how long ago and how many minutes are left), and the **Checked** tab lists them all. On the STN and scrap.tf pages themselves a checked item is grayed out with a small countdown on top until it is due again. An item is
+(with how long ago and how many minutes are left), and the **Checked** tab lists them all. Each direction of an STN hat
+is remembered separately. On the STN and scrap.tf pages themselves a checked item is grayed out with a small
+countdown on top until it is due again: an STN hat checked **both ways** (and a scrap.tf hat, which only has
+one way) is grayed out fully, an STN hat checked **one way only** is grayed out slightly and labelled
+*Half checked* (hover the label for what is missing). An item is
 checked again as soon as its 60 minutes are up or its price on that site changes. Checks that failed
 (Backpack.tf did not load, a price could not be read) are not remembered, so they are retried.
 *Retry this item* and *Check saved items* always check, and *Forget checked items* clears the memory.

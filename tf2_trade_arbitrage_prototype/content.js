@@ -1588,6 +1588,7 @@
       style.id="tf2-arb-checked-style";
       style.textContent=`
         .tf2-arb-veil{position:absolute;top:0;right:0;bottom:0;left:0;z-index:5;pointer-events:none;background:rgba(105,105,105,.62);-webkit-backdrop-filter:grayscale(1);backdrop-filter:grayscale(1)}
+        .tf2-arb-veil.tf2-arb-veil-half{background:rgba(105,105,105,.2);-webkit-backdrop-filter:grayscale(.4);backdrop-filter:grayscale(.4)}
         .tf2-arb-timer{position:absolute;top:2px;left:50%;transform:translateX(-50%);z-index:6;pointer-events:none;padding:1px 6px;border:1px solid #111;border-radius:3px;background:rgba(25,25,25,.92);color:#e7a34b;font:bold 10px/14px Tahoma,Verdana,sans-serif;letter-spacing:.2px;white-space:nowrap}`;
       (document.head||document.documentElement).appendChild(style);
     }
@@ -1609,10 +1610,33 @@
         price:node.querySelector(".item-price")?.textContent||""
       };
     }
-    function timerText(expiresAt){
+    function timerText(expiresAt,label){
       const left=Math.max(0,Math.ceil((expiresAt-Date.now())/1000));
       const minutes=Math.floor(left/60),seconds=left%60;
-      return `Checked · next in ${minutes}:${String(seconds).padStart(2,"0")}`;
+      return `${label||"Checked"} · next in ${minutes}:${String(seconds).padStart(2,"0")}`;
+    }
+    // How much of an item is checked. A scrap.tf item has one direction (buy there,
+    // sell on Backpack.tf). An STN item has two: that one, and buying on
+    // Backpack.tf to sell to STN. Both fresh = full, one = partial. A row from
+    // before directions existed (no "forward"/"reverse" keys) is a forward check.
+    function checkedState(entry,info,now){
+      if(!entry)return null;
+      const legacy=entry.forward===undefined&&entry.reverse===undefined;
+      const forward=legacy?entry:entry.forward;
+      const reverse=legacy?null:entry.reverse;
+      const samePrice=block=>block&&Number(block.expiresAt)>now&&norm(block.price)===norm(info.price);
+      const done=[];
+      if(samePrice(forward)&&(entry.source==="scrap.tf"?"scrap.tf":"stn")===site)done.push({dir:"forward",expiresAt:Number(forward.expiresAt)});
+      if(!onScrap&&samePrice(reverse))done.push({dir:"reverse",expiresAt:Number(reverse.expiresAt)});
+      if(!done.length)return null;
+      const full=done.length>=(onScrap?1:2);
+      const missing=full?"":(done[0].dir==="forward"?"Not yet checked: buying on Backpack.tf to sell to STN.":"Not yet checked: buying here to sell on Backpack.tf.");
+      return {
+        full,
+        expiresAt:Math.min(...done.map(block=>block.expiresAt)),
+        label:full?"Checked":"Half checked",
+        title:full?"Checked in every direction; checked again when the timer ends":missing
+      };
     }
     function unmark(node){
       node.classList.remove("tf2-arb-checked");
@@ -1623,10 +1647,12 @@
         delete node.dataset.tf2ArbSetPosition;
       }
       delete node.dataset.tf2ArbExpires;
+      delete node.dataset.tf2ArbLabel;
     }
     function mark(node,entry){
       node.classList.add("tf2-arb-checked");
       node.dataset.tf2ArbExpires=String(entry.expiresAt);
+      node.dataset.tf2ArbLabel=entry.label;
       if(getComputedStyle(node).position==="static"){
         node.style.position="relative";
         node.dataset.tf2ArbSetPosition="1";
@@ -1636,6 +1662,8 @@
         veil.className="tf2-arb-veil";
         node.appendChild(veil);
       }
+      // Fully checked items are grayed out; items checked one way only just slightly.
+      node.querySelector(":scope > .tf2-arb-veil").classList.toggle("tf2-arb-veil-half",!entry.full);
       let badge=node.querySelector(":scope > .tf2-arb-timer");
       if(!badge){
         badge=document.createElement("span");
@@ -1643,8 +1671,9 @@
         badge.appendChild(document.createTextNode(""));
         node.appendChild(badge);
       }
-      const text=timerText(entry.expiresAt);
+      const text=timerText(entry.expiresAt,entry.label);
       if(badge.firstChild.nodeValue!==text)badge.firstChild.nodeValue=text;
+      if(badge.title!==entry.title)badge.title=entry.title;
     }
 
     function apply(){
@@ -1652,9 +1681,8 @@
       const now=Date.now();
       for(const node of candidateNodes()){
         const info=nodeInfo(node);
-        const entry=table[norm(info.name)];
-        const fresh=entry&&Number(entry.expiresAt)>now&&entry.source===site&&norm(entry.price)===norm(info.price);
-        if(fresh)mark(node,entry);
+        const state=checkedState(table[norm(info.name)],info,now);
+        if(state)mark(node,state);
         else if(node.classList.contains("tf2-arb-checked"))unmark(node);
       }
     }
@@ -1671,7 +1699,7 @@
         const expiresAt=Number(node.dataset.tf2ArbExpires);
         if(!(expiresAt>now)){expired=true;continue}
         const badge=node.querySelector(":scope > .tf2-arb-timer");
-        const text=timerText(expiresAt);
+        const text=timerText(expiresAt,node.dataset.tf2ArbLabel);
         if(badge?.firstChild&&badge.firstChild.nodeValue!==text)badge.firstChild.nodeValue=text;
       }
       if(expired)apply();

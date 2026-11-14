@@ -56,7 +56,9 @@
     <div id="macStatus" class="api-key-status" role="status" aria-live="polite">Not configured.</div>
   </details>
   <div class="hint">STN purchase completion is verified through the Steam Web API for the exact offer ID. Only trade_offer_state 3 (Accepted) counts as complete; state 9 (CreatedNeedsConfirmation) and state 11 (InEscrow) do not. Approve mobile confirmations yourself. Acceptance of outgoing bot offers is not tracked.</div>
-  <button id="scan" title="Reads every stntrading.eu and scrap.tf page open in this window">Scan STN + scrap.tf pages</button>
+  <button id="scan" title="Reads every stntrading.eu and scrap.tf page open in this window. STN hats are checked both ways: buy on STN and sell on Backpack.tf, and buy on Backpack.tf and sell to STN. scrap.tf hats are checked buying on scrap.tf.">Scan STN + scrap.tf pages</button>
+  <button id="scanStn" class="secondary-scan" title="Same scan, but only the stntrading.eu page(s) open in this window (both directions)">Scan STN only</button>
+  <button id="scanScrap" class="secondary-scan" title="Same scan, but only the scrap.tf Buy Hats page(s) open in this window">Scan scrap.tf only</button>
   <button id="scanReverse" class="secondary-scan" title="Reads the stntrading.eu hats page open in this window, then for each hat checks what STN pays for it (its item page, 'Sell it for') against the cheapest sell listings on Backpack.tf. Nothing is bought automatically.">Scan STN buy prices (buy on Backpack.tf, sell to STN)</button>
   <button id="stop" class="secondary">Stop</button>
   <label class="automation-toggle">
@@ -95,6 +97,7 @@
   <div id="tradersView" hidden></div>
   <div id="boughtView" hidden></div>
   <div id="checkedView" hidden></div>
+  <script src="checked-items.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

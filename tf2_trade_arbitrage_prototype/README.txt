@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.118
+Current version 0.7.119
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.119 changes:
+- "Scan STN + scrap.tf pages" now checks every STN hat in both directions: buy on STN and sell on Backpack.tf (as before), and buy on Backpack.tf and sell to STN (the reverse scan). scrap.tf hats keep their one direction. New buttons "Scan STN only" and "Scan scrap.tf only" run the same scan on a single site.
+- The 60-minute checked table now remembers each direction separately (old rows count as forward checks). On the STN and scrap.tf pages an item checked in every direction is grayed out fully; an STN hat checked only one way is grayed out slightly and labelled "Half checked". The Checked tab lists both directions. The stand-alone "Scan STN buy prices" scan now uses and fills the same table.
 
 V0.7.118 changes:
 - scrap.tf buying now finds the hat with the page's own "Search for items" box (input.inventory-search): the name is typed in, the list filters, and the visible copies are the ones selected. The box is cleared if the hat is no longer listed.

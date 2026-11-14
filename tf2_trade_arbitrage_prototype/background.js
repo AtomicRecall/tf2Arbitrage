@@ -2410,11 +2410,51 @@ function updateSavedTrades(result){
 // price could not be read) are not recorded, so those items are tried again.
 const CHECK_FAILURE_REASON=/did not return a usable|Could not parse|did not finish loading|Could not (?:read|open)|has none in stock|^Stopped\./i;
 function isConclusiveCheck(result){
-  if(result?.reverse)return false;
   if(!result?.name||!result.sourceItem?.price)return false;
   if(!result.skipped)return true;
-  if(!result.attempts?.length)return false;
+  // A reverse check that stopped early (STN buys no more of it, Backpack.tf has no
+  // sell listing) is an answer; one that could not load a page is not. Forward
+  // checks that never reached Backpack.tf have no attempts and are not recorded.
+  if(!result.reverse&&!result.attempts?.length)return false;
   return !CHECK_FAILURE_REASON.test(String(result.reason||""));
+}
+
+// A result card for one direction of an item that was checked recently and is
+// skipped. `direction` is "forward" (buy on the marketplace, sell on Backpack.tf)
+// or "reverse" (buy on Backpack.tf, sell to STN).
+function alreadyCheckedResult(entry,block,direction){
+  const reverse=direction==="reverse";
+  const outcome=block.outcome==="good"
+    ?(reverse?"it was a hit":"it was a Good Trade")
+    :block.outcome==="not-found"
+      ?(reverse?"no usable STN price or sell listing":"no usable Buy Order")
+      :"not profitable";
+  const scrap=!reverse&&entry.source==="scrap.tf";
+  return {
+    name:entry.name,
+    skipped:true,
+    alreadyChecked:true,
+    checkedDirection:direction,
+    source:reverse?"stn":entry.source,
+    reason:`Already checked${reverse?" (buy on Backpack.tf, sell to STN)":""} ${Math.max(1,Math.round((Date.now()-block.checkedAt)/60000))} min ago at ${block.price} (${outcome}). Checks again in ${Math.max(1,Math.ceil((block.expiresAt-Date.now())/60000))} min.`,
+    checkedAt:block.checkedAt,
+    checkedExpiresAt:block.expiresAt,
+    checkedOutcome:block.outcome,
+    sourceItem:{
+      name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||marketplaceUrl(entry.name),
+      ...(scrap?{source:"scrap.tf",scrapValue:Number(entry.scrapValue)||null}:{}),
+      ...(reverse?{source:"stn",reverse:true}:{})
+    },
+    attempts:[]
+  };
+}
+
+// Emits the skipped results to the popup after a scan started.
+function emitAlreadyChecked(skippedResults){
+  if(!skippedResults.length)return;
+  emitTradeAutomationStatus(`Skipping ${skippedResults.length} check${skippedResults.length===1?"":"s"} already done in the last 60 minutes.`);
+  let done=0;
+  for(const skippedResult of skippedResults)popup({type:"SCAN_RESULT",result:skippedResult,checked:++done,total});
 }
 
 let checkedItemsChain=Promise.resolve();
@@ -2425,9 +2465,10 @@ function recordCheckedItem(result){
     const map=(await storageGet({[key]:{}}))[key]||{};
     TF2CheckedItems.record(map,{
       name:result.name,
-      source:result.source,
+      direction:result.reverse?"reverse":"forward",
+      source:result.reverse?"stn":result.source,
       price:result.sourceItem.price,
-      outcome:result.deal?"good":(result.skipped?"not-found":"not-good"),
+      outcome:(result.deal||result.reverseDeal)?"good":(result.skipped?"not-found":"not-good"),
       note:result.skipped?result.reason:"",
       profitRef:result.profitRef
     });
@@ -3304,9 +3345,14 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       keyRate=+m.keyRate||63;
       // Every STN and scrap.tf page open in this window is read (the active tab
       // first), so both marketplaces are checked in one scan.
-      const marketplacePage=/^https:\/\/(?:www\.)?(?:stntrading\.eu|scrap\.tf)\//i;
+      // "sites" limits the scan to one marketplace ("stn" or "scrap.tf"); anything
+      // else scans both. STN items are checked in both directions.
+      const sites=m.sites==="stn"||m.sites==="scrap.tf"?m.sites:"all";
+      const marketplacePage=sites==="stn"?/^https:\/\/(?:www\.)?stntrading\.eu\//i
+        :sites==="scrap.tf"?/^https:\/\/(?:www\.)?scrap\.tf\//i
+        :/^https:\/\/(?:www\.)?(?:stntrading\.eu|scrap\.tf)\//i;
       const windowTabs=await qTabs({windowId:tab.windowId}).catch(()=>[tab]);
-      const pageTabs=[tab,...windowTabs.filter(other=>other.id!==tab.id&&marketplacePage.test(String(other.url||"")))];
+      const pageTabs=[tab,...windowTabs.filter(other=>other.id!==tab.id)].filter(other=>marketplacePage.test(String(other.url||"")));
       // The Craft Hats section is hundreds of 1.77 ref hats that Backpack.tf
       // buyers never pay that much for; skipping it saves most of the scan.
       const skipCraft=(await storageGet({scrapSkipCraft:true})).scrapSkipCraft!==false;
@@ -3325,8 +3371,20 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       if(!found.length){
         sendResponse({ok:false,error:craftSkipped
           ?"Only Craft Hats were found on the scrap.tf page and they are skipped (see the checkbox in the popup)."
-          :"No TF2 marketplace items found. Open stntrading.eu and/or scrap.tf/buy/hats first."});
+          :(sites==="stn"?"No STN items found. Open the stntrading.eu hats listing first."
+            :sites==="scrap.tf"?"No scrap.tf items found. Open scrap.tf/buy/hats first (signed in)."
+            :"No TF2 marketplace items found. Open stntrading.eu and/or scrap.tf/buy/hats first.")});
         return;
+      }
+      // Every STN item is also checked the other way round: buy on Backpack.tf and
+      // sell to STN (see processReverseItem). That is not tied to the cheaper-site
+      // choice below, because STN pays for the item whichever site sells it cheaper.
+      const reverseByKey=new Map();
+      for(const entry of found){
+        if(entry.source!=="stn")continue;
+        const reverseKey=TF2CheckedItems.keyFor(entry.name);
+        if(!reverseKey||reverseByKey.has(reverseKey))continue;
+        reverseByKey.set(reverseKey,{name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||"",source:"stn",reverse:true});
       }
       // An item listed on both sites is checked once, at the cheaper price: that
       // is the one worth buying.
@@ -3348,25 +3406,24 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       const checkedMap=(await storageGet({[TF2CheckedItems.STORAGE_KEY]:{}}))[TF2CheckedItems.STORAGE_KEY]||{};
       const toScan=[];
       const alreadyChecked=[];
+      const reverseHandled=new Set();
+      const planReverse=key=>{
+        const candidate=reverseByKey.get(key);
+        if(!candidate||reverseHandled.has(key))return;
+        reverseHandled.add(key);
+        const previous=TF2CheckedItems.skipEntry(checkedMap,candidate,Date.now(),"reverse");
+        if(previous)alreadyChecked.push(alreadyCheckedResult(candidate,previous,"reverse"));
+        else toScan.push(candidate);
+      };
+      // An item's two directions are queued next to each other, so it is fully
+      // checked (and grayed out on the marketplace page) as soon as possible.
       for(const entry of items){
         const previous=TF2CheckedItems.skipEntry(checkedMap,entry);
-        if(!previous){toScan.push(entry);continue}
-        alreadyChecked.push({
-          name:entry.name,
-          skipped:true,
-          alreadyChecked:true,
-          source:entry.source,
-          reason:`Already checked ${Math.max(1,Math.round((Date.now()-previous.checkedAt)/60000))} min ago at ${previous.price} (${previous.outcome==="good"?"it was a Good Trade":previous.outcome==="not-found"?"no usable Buy Order":"not profitable"}). Checks again in ${Math.max(1,Math.ceil((previous.expiresAt-Date.now())/60000))} min.`,
-          checkedAt:previous.checkedAt,
-          checkedExpiresAt:previous.expiresAt,
-          checkedOutcome:previous.outcome,
-          sourceItem:{
-            name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||marketplaceUrl(entry.name),
-            ...(entry.source==="scrap.tf"?{source:"scrap.tf",scrapValue:Number(entry.scrapValue)||null}:{})
-          },
-          attempts:[]
-        });
+        if(previous)alreadyChecked.push(alreadyCheckedResult(entry,previous,"forward"));
+        else toScan.push(entry);
+        planReverse(TF2CheckedItems.keyFor(entry.name));
       }
+      for(const key of reverseByKey.keys())planReverse(key);
       sourceTabsBySource=tabsBySource;
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
@@ -3375,14 +3432,11 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
-      queue=interleaveBySource(toScan);total=items.length;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      if(reverseByKey.size)sources["stn-reverse"]=reverseByKey.size;
+      queue=interleaveBySource(toScan);total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources,alreadyChecked:alreadyChecked.length});
-      if(alreadyChecked.length){
-        emitTradeAutomationStatus(`Skipping ${alreadyChecked.length} item${alreadyChecked.length===1?"":"s"} already checked in the last 60 minutes; ${toScan.length} left to check.`);
-        let done=0;
-        for(const skippedResult of alreadyChecked)popup({type:"SCAN_RESULT",result:skippedResult,checked:++done,total});
-      }
+      emitAlreadyChecked(alreadyChecked);
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
       next();
     });
@@ -3415,10 +3469,19 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
-      queue=[...found.values()];
-      total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
-      await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
-      sendResponse({ok:true,total,sources:{stn:total}});
+      const checkedMap=(await storageGet({[TF2CheckedItems.STORAGE_KEY]:{}}))[TF2CheckedItems.STORAGE_KEY]||{};
+      const toScan=[];
+      const alreadyChecked=[];
+      for(const candidate of found.values()){
+        const previous=TF2CheckedItems.skipEntry(checkedMap,candidate,Date.now(),"reverse");
+        if(previous)alreadyChecked.push(alreadyCheckedResult(candidate,previous,"reverse"));
+        else toScan.push(candidate);
+      }
+      queue=toScan;
+      total=found.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
+      sendResponse({ok:true,total,sources:{"stn-reverse":total},alreadyChecked:alreadyChecked.length});
+      emitAlreadyChecked(alreadyChecked);
       emitTradeAutomationStatus("Checking what STN pays for each hat against Backpack.tf sell listings. Nothing is bought automatically on this side.");
       next();
     })().catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
