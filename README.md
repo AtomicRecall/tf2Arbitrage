@@ -1,0 +1,218 @@
+# TF2 Arbitrage Bot
+
+A set of Firefox add-ons (plus a small Mac helper) that finds Team Fortress 2 hats
+that can be **bought cheaply on STN Trading or scrap.tf and sold for more to
+Backpack.tf buy-order bots**, and can carry out the whole trade for you.
+
+> **Use at your own risk.** With automatic trading on, this spends real items and
+> sends real Steam trade offers from your account. Read "Safety" below first, start
+> with automatic trading **off**, and try one cheap hat before trusting it.
+> Automating third-party sites may break their rules; that is your responsibility.
+
+---
+
+## What it does
+
+1. **Reads a marketplace.** It reads every hat on the STN hats listing
+   (`stntrading.eu`) and on scrap.tf's Buy Hats page (`scrap.tf/buy/hats`), with
+   the price and how many are in stock.
+2. **Looks up the sell side.** For each hat it opens the Backpack.tf stats and
+   classifieds pages and collects the **buy orders placed by bots** (listings with
+   the "Please only offer the buyout" button). It ignores listings that want a
+   special version of the hat: parts attached, spells, paint, and similar.
+3. **Finds profit.** A hat is a *price-profitable* hit when the best bot buy order
+   pays more than the marketplace price (by at least 0.05 ref), using the key rate
+   you set.
+4. **Checks the trade is real.** It opens each profitable bot's Steam trade-offer
+   page and, with the **TF2 Metal Trader** add-on, tests that the bot really has
+   enough metal to pay. Offers that pass are *verified*; the result becomes a
+   **Good Trade** and you get a notification and sound.
+5. **Optionally does the trade for you** (automatic trading):
+   - buys the hat from STN (QuickBuy) or scrap.tf (selects it and presses the cart),
+   - accepts the Steam offer the site sends,
+   - asks the Mac to approve the Steam mobile confirmation,
+   - waits until the Steam Web API says the purchase is *Accepted*,
+   - then sends your hats to the Backpack.tf buyers as trade offers, and keeps
+     watching them, re-sending any that Steam cancels.
+
+STN and scrap.tf are scanned together; an item listed on both is checked once, at the
+cheaper price. Each result card shows which site it came from, and a **Bought** tab
+counts how many hats were bought from each.
+
+---
+
+## What is in this repository
+
+| Folder | What it is |
+| --- | --- |
+| `tf2_trade_arbitrage_prototype/` | **The analyzer / scanner add-on** (the main bot). Popup and sidebar UI, scanning, verification, trade queue. |
+| `automaticMetal/` | **TF2 Metal Trader** add-on. Works on Steam trade-offer pages: stages the right metal, sends the bot offers, accepts incoming offers. The analyzer drives it. |
+| `macConfirmer/` | A small server for a Mac that accepts **Steam mobile confirmations** by clicking in the Steam app through iPhone Mirroring. |
+| `browserShell/` | A launcher that starts a dedicated Firefox with both add-ons preinstalled, the analyzer in the sidebar, and the confirm server running. (Mac.) |
+
+Both add-ons are needed: the analyzer finds and queues trades, TF2 Metal Trader does
+the work on Steam's pages.
+
+---
+
+## Requirements
+
+- **Firefox Developer Edition, Nightly or ESR** (regular Firefox refuses unsigned add-ons).
+- A Steam account signed in to **Steam, backpack.tf, stntrading.eu and scrap.tf** in that browser.
+- A **Steam Web API key** (https://steamcommunity.com/dev/apikey), needed for automatic trading.
+  It stays in the add-on's local storage.
+- For hands-free trading: a **Mac** with **iPhone Mirroring**, the Steam app on the iPhone with
+  mobile confirmations enabled, and `cliclick` (`brew install cliclick`).
+- Python 3 (only for the Mac helper and launcher).
+
+---
+
+## Install
+
+### Windows (or any computer, temporary add-ons)
+
+1. Open Firefox Developer Edition and go to `about:debugging#/runtime/this-firefox`.
+2. **Load Temporary Add-on...** and pick `automaticMetal/manifest.json`.
+3. Load Temporary Add-on again and pick `tf2_trade_arbitrage_prototype/manifest.json`.
+4. The analyzer opens in the sidebar (toggle it with **Alt+Shift+T**) or from the toolbar button.
+
+Temporary add-ons disappear when Firefox closes, so repeat this each time. They also lose
+their settings, which is why the Mac launcher below is nicer for daily use.
+
+### Mac (recommended: dedicated browser plus confirmer)
+
+```bash
+brew install cliclick
+python3 browserShell/launch.py --server-dry-run   # first run: nothing is clicked
+python3 browserShell/launch.py                    # real run
+```
+
+The launcher packs both add-ons into their own Firefox profile (logins and settings are
+kept between runs), opens STN and scrap.tf as tabs, starts the confirm server and fills in the
+Mac confirmer settings for you. You can also double-click `browserShell/TF2 Trader.command`.
+Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
+
+---
+
+## First-time setup in the sidebar
+
+1. Set **1 key = ... ref** to the current key price.
+2. Paste your **Steam Web API key** and press *Save key*.
+3. Leave **Automatically buy items and send bot offers** *off* until you have watched a few scans.
+4. Optional: set the sound volume, and decide whether to **skip scrap.tf's Craft Hats**
+   section (on by default; it is hundreds of cheap hats that are almost never profitable).
+
+---
+
+## Using it
+
+### Scan
+
+1. Open **`stntrading.eu`** (the hats listing) and/or **`scrap.tf/buy/hats`** in the same window
+   (scrap.tf needs you signed in).
+2. Press **Scan STN + scrap.tf pages**. Every STN and scrap.tf page open in the window is read, and
+   the two sites are checked alternately. A separate **TF2 Arbitrage Scanner** window opens for the
+   Backpack.tf and Steam pages and closes when the work is done. Keep it open and visible.
+3. Watch the result tabs:
+
+| Tab | Meaning |
+| --- | --- |
+| All / Found | Everything checked / items with a Backpack.tf price |
+| **Good Trades** | Profitable and the bot was verified to have the metal |
+| Unverified Trades | Profitable but the bot's metal could not be verified |
+| Not Found | No usable Backpack.tf bot buy order |
+| Dismissed | Items you hid (use *Dismiss* on a card; *Restore* brings it back) |
+| Traders | Traders you marked with *Mark traded* on Backpack.tf pages |
+| **Bought** | Hats bought, in total and per site (STN / scrap.tf), with the Steam offer numbers |
+| **Checked** | Items checked in the last 60 minutes, at the price they were checked at, with a countdown. The next scan skips them. |
+
+A hit also shows a notification and plays `hit.mp3`. Card buttons: *Backpack.tf, highlight verified*
+opens the exact buy-order listings, *Retry this item* rechecks it, and *Auto trade (skip STN)*
+sends offers using hats you already own.
+
+### Automatic trading
+
+Tick **Automatically buy items and send bot offers** (a Steam Web API key is required). For each
+Good Trade the bot then:
+
+1. buys the hat on the cheaper site (STN or scrap.tf),
+2. accepts the Steam offer and waits for the Steam Web API to report *Accepted*
+   (it asks the Mac to do the mobile confirmation),
+3. sends the verified Backpack.tf offers, one hat set per buyer, using different copies each time,
+4. tracks them and re-sends any Steam cancelled.
+
+If scrap.tf only allows part of a quantity at once, it buys in batches. The status box in the sidebar
+shows the current step. Sounds follow the same pattern for both sites: `middle1.wav` when a
+purchase is accepted and more is coming, `middle2.wav` when it was the last and again after the last
+offer is sent, `Item_metal_pot_drop.wav` when a scan ends.
+
+### Already checked items (60-minute memory)
+
+Every item the bot checks is remembered for **60 minutes**, together with the price it was checked at
+and the site it was on. A scan skips these items: they still show up as cards marked **Already checked**
+(with how long ago and how many minutes are left), and the **Checked** tab lists them all. An item is
+checked again as soon as its 60 minutes are up or its price on that site changes. Checks that failed
+(Backpack.tf did not load, a price could not be read) are not remembered, so they are retried.
+*Retry this item* and *Check saved items* always check, and *Forget checked items* clears the memory.
+
+### Check saved items
+
+Every Good Trade, from STN or scrap.tf, is saved in the browser. **Check saved items** reopens each one
+on the site it was found on (its STN page, or the scrap.tf Buy Hats page) and on Backpack.tf and runs
+the normal check again.
+
+### Mac confirmer
+
+Steam asks for a mobile confirmation when you give items away. The Mac helper accepts these by
+clicking in the Steam app through iPhone Mirroring. Notes:
+
+- Open iPhone Mirroring on the Steam app's **Confirmations** screen and do not move or resize it.
+  The click positions in `macConfirmer/confirm_trades.py` (`TRADE_OFFER`, `CONFIRM_BUTTON`,
+  `TIMEOUT_RETRY_BUTTON`) were measured on one screen. Re-measure them with `cliclick p` on yours.
+- It accepts the *top* confirmation in the app, matched by count, not by trade. Do not leave
+  unrelated confirmations pending while it runs.
+- It pauses after any failure instead of clicking again. Check the server output, fix it, then resume.
+- Use `--server-dry-run` (launcher) or `--dry-run` (scripts) to test without clicking.
+
+Run the server by hand with `macConfirmer/run_server.sh` (add `--dry-run` to test). In the sidebar's
+*Mac confirmer* section enter its address and token and press *Test connection*.
+
+---
+
+## Safety and limits
+
+- **It moves real items.** Automatic trading is off by default and only acts on trades whose
+  buyer was verified to have enough metal and whose purchase the Steam Web API reported *Accepted*.
+- Before pressing scrap.tf's cart button it checks the price has not risen since the scan, that nothing
+  else is selected, and that the item is exactly the one wanted.
+- Mobile confirmation is the final safety net: without the Mac helper you approve on your phone.
+- The scan is slow and serial on purpose (Backpack.tf rate-limits), so two items are never checked at
+  the exact same moment; the two sites just take turns.
+- Unusual hats are skipped on scrap.tf (it does not name the effect).
+- Listings from the traders in `tf2_trade_arbitrage_prototype/blacklist.js` are ignored. Add a Steam ID
+  there to block another trader.
+- The Mac server token is stored in `macConfirmer/server_config.json` (git-ignored). Never publish it,
+  and do not commit your Steam Web API key.
+- STN uses a bot check that only runs in a visible page; keep the scanner window visible, not minimized.
+
+---
+
+## Troubleshooting
+
+| Symptom | Try |
+| --- | --- |
+| "No TF2 marketplace items found" | Open the STN hats listing or `scrap.tf/buy/hats` (signed in), let it finish loading, scan again. |
+| Auto trading will not switch on | Save a Steam Web API key first. |
+| scrap.tf purchase says the item list is missing | You are not signed in to scrap.tf in that browser. |
+| Offer accepted but the Mac does nothing | Check the status line for "Asked the Mac to confirm" and the confirm server output; use *Test connection*; make sure the server is not in dry-run mode. |
+| Confirm clicks land in the wrong place | Re-measure the coordinates in `macConfirmer/confirm_trades.py` with `cliclick p`. |
+| Logins vanish after restarting | Use the Mac launcher, or keep "Stay signed in" ticked; temporary add-ons lose their settings on restart. |
+
+---
+
+## More documentation
+
+- [`tf2_trade_arbitrage_prototype/README.txt`](tf2_trade_arbitrage_prototype/README.txt): detailed change log of the analyzer.
+- [`automaticMetal/README.md`](automaticMetal/README.md): change log of TF2 Metal Trader.
+- [`browserShell/SETUP.md`](browserShell/SETUP.md): Mac browser and launcher setup.
+- Header comments in `macConfirmer/confirm_server.py` and `confirm_trades.py` describe the Mac helper's endpoints and options.

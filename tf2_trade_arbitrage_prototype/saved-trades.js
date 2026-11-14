@@ -19,8 +19,13 @@
     if(!key||!result?.deal)return map;
     const previous=map[key];
     const buy=result.buyPrice?.display||result.sourceItem?.price||previous?.buyPrice||"";
+    const scrap=result.source==="scrap.tf";
     map[key]={
       name,
+      // Where it was found: a saved scrap.tf item is re-checked on scrap.tf.
+      source:scrap?"scrap.tf":"stn",
+      sourceHref:scrap?String(result.sourceItem?.href||""):"",
+      scrapValue:scrap?(Number(result.sourceItem?.scrapValue)||null):null,
       buyPrice:String(buy),
       sellPrice:String(result.sellPrice?.display||previous?.sellPrice||""),
       profitRef:Number.isFinite(result.profitRef)?result.profitRef:(previous?.profitRef??null),

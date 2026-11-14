@@ -6,12 +6,14 @@ const $=id=>document.getElementById(id);
 const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
+const checkedView=$("checkedView"),tabChecked=$("tabChecked");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
 let dismissedItems=new Set();
 let traderHistory={};
 let purchaseLog=[];
+let checkedItems={};
 let steamApiKeyConfigured=false;
 
 const DEFAULT_VOLUME=0.4;
@@ -42,9 +44,12 @@ function renderTradeAutomation(state){
     lines.push(`ACTIVE ITEM: ${state.active.name}`);
     lines.push(`WORKFLOW: ${String(state.active.step||"working").replace(/-/g," ")}`);
     if(Number.isFinite(Number(state.active.quantity)))lines.push(`VERIFIED TARGET: ${Number(state.active.quantity)} item${Number(state.active.quantity)===1?"":"s"} across ${Number(state.active.offerCount)||0} offer${Number(state.active.offerCount)===1?"":"s"}`);
-    if(state.active.skipPurchase)lines.push("PURCHASE MODE: STN skipped; using existing TF2 inventory");
-    if(Number(state.active.purchasedQuantity)>0)lines.push(`STN ITEMS ACCEPTED: ${Number(state.active.purchasedQuantity)}/${Number(state.active.quantity)||0}`);
-    if(state.active.purchaseOfferId)lines.push(`STN STEAM OFFER: #${state.active.purchaseOfferId}`);
+    const siteName=state.active.source==="scrap.tf"?"scrap.tf":"STN";
+    const siteUpper=siteName.toUpperCase();
+    lines.push(`BUYING FROM: ${siteName}`);
+    if(state.active.skipPurchase)lines.push(`PURCHASE MODE: ${siteName} skipped; using existing TF2 inventory`);
+    if(Number(state.active.purchasedQuantity)>0)lines.push(`${siteUpper} ITEMS ACCEPTED: ${Number(state.active.purchasedQuantity)}/${Number(state.active.quantity)||0}`);
+    if(state.active.purchaseOfferId)lines.push(`${siteUpper} STEAM OFFER: #${state.active.purchaseOfferId}`);
     const progress=state.active.purchaseProgress;
     if(progress){
       const phaseLabels={
@@ -176,8 +181,8 @@ function renderResult(r,prepend=true){
   const resultId=String(r.resultId||`${key}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`);
   const d=document.createElement("div");
   const dismissed=isDismissed(r.name);
-  const category=dismissed?"dismissed":(r.skipped?"notfound":(r.deal?"deal":"found"));
-  d.className="result "+(dismissed?"dismissed":(r.skipped?"skip":(r.deal?"deal":"loss")));
+  const category=dismissed?"dismissed":(r.alreadyChecked?"checked":(r.skipped?"notfound":(r.deal?"deal":"found")));
+  d.className="result "+(dismissed?"dismissed":(r.alreadyChecked?"skip already-checked":(r.skipped?"skip":(r.deal?"deal":"loss"))));
   d.dataset.category=category;
   d.dataset.key=key;
   d.dataset.resultId=resultId;
@@ -185,7 +190,7 @@ function renderResult(r,prepend=true){
   const attempts=Array.isArray(r.attempts)?r.attempts:[];
   const offerChecks=Array.isArray(r.offerChecks)?r.offerChecks:[];
   const verifiedOfferCount=offerChecks.filter(entry=>entry.verification?.status==="sufficient").length;
-  let html=`<div class="result-top"><div class="name">${esc(r.name)}${sourceBadge(r.source||r.sourceItem?.source)}</div><button class="dismiss-item" title="Dismiss this item">${dismissed?"Restore":"Dismiss"}</button></div>`;
+  let html=`<div class="result-top"><div class="name">${esc(r.name)}${sourceBadge(r.source||r.sourceItem?.source)}${r.alreadyChecked?' <span class="checked-badge" title="Checked recently; scans skip this item for 60 minutes after a check unless its price changes">Already checked</span>':""}</div><button class="dismiss-item" title="Dismiss this item">${dismissed?"Restore":"Dismiss"}</button></div>`;
   if(r.skipped){
     html+=`<div class="line reason">${esc(r.reason)}</div>`;
   }else{
@@ -234,7 +239,7 @@ function renderResult(r,prepend=true){
       await saveDismissed();
       dismiss.textContent="Dismiss";
       d.classList.remove("dismissed");
-      d.dataset.category=r.skipped?"notfound":(r.deal?"deal":"found");
+      d.dataset.category=r.alreadyChecked?"checked":(r.skipped?"notfound":(r.deal?"deal":"found"));
     }else{
       dismissedItems.add(key);
       await saveDismissed();
@@ -300,16 +305,19 @@ function updateTabCounts(){
   tabDismissed.textContent=dismissed;
   tabTraders.textContent=String(Object.values(traderHistory).filter(entry=>Number(entry?.count)>0).length);
   tabBought.textContent=String(boughtTotals().total);
+  tabChecked.textContent=String(checkedEntries().length);
 }
 function applyFilter(){
   const showTraders=activeFilter==="traders";
   const showUnverified=activeFilter==="unverified";
   const showBought=activeFilter==="bought";
-  results.hidden=showTraders||showUnverified||showBought;
-  unverifiedResults.hidden=showTraders||showBought||!showUnverified;
+  const showChecked=activeFilter==="checked";
+  results.hidden=showTraders||showUnverified||showBought||showChecked;
+  unverifiedResults.hidden=showTraders||showBought||showChecked||!showUnverified;
   tradersView.hidden=!showTraders;
   boughtView.hidden=!showBought;
-  if(showTraders||showUnverified||showBought){
+  checkedView.hidden=!showChecked;
+  if(showTraders||showUnverified||showBought||showChecked){
     unverifiedResults.querySelectorAll(".result").forEach(card=>{
       card.style.display=isDismissed(card.dataset.key)?"none":"";
     });
@@ -555,11 +563,11 @@ async function startScan(type){
   activeFilter="all"; tabs.forEach(x=>x.classList.toggle("active",x.dataset.filter==="all"));
   applyFilter();
   updateTabCounts();
-  checked.textContent="0";
+  checked.textContent=String(r.alreadyChecked||0);
   deals.textContent="0";
   total.textContent=r.total;
   const sourceText=Object.entries(r.sources||{}).map(([name,count])=>`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
-  status.textContent=`Checking 0 / ${r.total} items${sourceText?` (${sourceText})`:""}...`;
+  status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
 stop.onclick=async()=>{await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`};
 
@@ -610,7 +618,8 @@ function renderSaved(){
     const row=document.createElement("div");
     row.className="saved-row";
     const profit=Number.isFinite(entry.profitRef)?` · +${entry.profitRef.toFixed(2)} ref`:"";
-    row.innerHTML=`<div class="saved-name"><a href="${esc(stnItemUrl(entry.name))}" target="_blank" rel="noopener">${esc(entry.name)}</a><button class="secondary saved-remove" type="button" title="Remove from the saved items">Remove</button></div>`+
+    const savedLink=entry.source==="scrap.tf"?(safeWebUrl(entry.sourceHref)||"https://scrap.tf/buy/hats"):stnItemUrl(entry.name);
+    row.innerHTML=`<div class="saved-name"><span><a href="${esc(savedLink)}" target="_blank" rel="noopener">${esc(entry.name)}</a>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn")}</span><button class="secondary saved-remove" type="button" title="Remove from the saved items">Remove</button></div>`+
       `<div class="line">Buy ${esc(entry.buyPrice||"?")} → sell ${esc(entry.sellPrice||"?")}${esc(profit)}</div>`+
       `<div class="line reason">${esc(savedStatusText(entry))}</div>`;
     row.querySelector(".saved-remove").onclick=()=>{
@@ -695,6 +704,54 @@ function renderBought(){
   };
 }
 api.storage.local.get({purchaseLog:[]},v=>{purchaseLog=Array.isArray(v.purchaseLog)?v.purchaseLog:[];renderBought()});
+
+// ---- Already checked items (the 60-minute table kept by background.js) ------------
+const CHECKED_KEY="checkedItems";
+function checkedEntries(){
+  const now=Date.now();
+  return Object.values(checkedItems&&typeof checkedItems==="object"?checkedItems:{})
+    .filter(entry=>entry&&entry.name&&Number(entry.expiresAt)>now)
+    .sort((a,b)=>a.expiresAt-b.expiresAt);
+}
+function minutesLeft(entry){return Math.max(1,Math.ceil((Number(entry.expiresAt)-Date.now())/60000))}
+function checkedOutcomeText(entry){
+  if(entry.outcome==="good")return "Good Trade"+(Number.isFinite(entry.profitRef)?` (+${entry.profitRef.toFixed(2)} ref)`:"");
+  if(entry.outcome==="not-found")return "No usable Buy Order";
+  return "Not profitable";
+}
+function renderChecked(){
+  if(!checkedView)return;
+  const entries=checkedEntries();
+  tabChecked.textContent=String(entries.length);
+  if(!entries.length){
+    checkedView.innerHTML='<div class="trader-empty">Nothing checked in the last 60 minutes. Every item the bot checks is remembered here at the price it was checked at, and skipped by the next scan until its 60 minutes are up (or its price changes).</div>';
+    return;
+  }
+  const rows=entries.map(entry=>{
+    const when=new Date(Number(entry.checkedAt)).toLocaleTimeString();
+    return `<div class="checked-row ${esc(entry.outcome||"")}"><div class="checked-top"><span class="checked-name">${esc(entry.name)}</span>${sourceBadge(entry.source==="scrap.tf"?"scrap.tf":"stn").trim()}<span class="checked-timer">${minutesLeft(entry)} min left</span></div>`+
+      `<div class="line">Checked at ${esc(entry.price||"?")} · ${esc(checkedOutcomeText(entry))} · ${esc(when)}</div></div>`;
+  }).join("");
+  checkedView.innerHTML=
+    `<div class="hint">Skipped by scans for 60 minutes after a check, unless the price changes. "Retry this item" on a card checks it again right away.</div>`+
+    rows+
+    `<button id="clearChecked" class="secondary" type="button">Forget checked items</button>`;
+  checkedView.querySelector("#clearChecked").onclick=()=>{
+    if(!window.confirm("Forget every checked item? The next scan will check them all again."))return;
+    checkedItems={};
+    renderChecked();
+    api.storage.local.set({[CHECKED_KEY]:{}});
+  };
+}
+api.storage.local.get({[CHECKED_KEY]:{}},v=>{checkedItems=v[CHECKED_KEY]&&typeof v[CHECKED_KEY]==="object"?v[CHECKED_KEY]:{};renderChecked()});
+api.storage.onChanged?.addListener((changes,area)=>{
+  if(area!=="local"||!changes[CHECKED_KEY])return;
+  const value=changes[CHECKED_KEY].newValue;
+  checkedItems=value&&typeof value==="object"?value:{};
+  renderChecked();
+});
+// The countdowns and the tab count move on without any storage change.
+setInterval(renderChecked,30000);
 api.storage.onChanged?.addListener((changes,area)=>{
   if(area!=="local"||!changes.purchaseLog)return;
   purchaseLog=Array.isArray(changes.purchaseLog.newValue)?changes.purchaseLog.newValue:[];

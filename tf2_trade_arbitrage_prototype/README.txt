@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.113
+Current version 0.7.114
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,13 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.114 changes:
+- New "already checked" table (storage key checkedItems, next to savedTrades). Every conclusive check stores the item, the price it was checked at, the site (STN or scrap.tf) and a 60-minute timer. Failed checks (Backpack.tf did not load, a price could not be read) are not stored, so they are tried again.
+- A normal scan skips every item that is still inside its 60 minutes and whose price on that site has not changed. A changed price or the other site's listing is checked again. "Check saved items" and the card's "Retry this item" button always check.
+- Skipped items still appear in the results with an "Already checked" badge, the age of the check and the minutes left, and they count towards the scan's progress. A new "Checked" tab lists the whole table with a countdown per item and a button to forget it.
+- Good Trades found on scrap.tf are now saved like STN ones (with the site and its page), shown with a source badge in the saved list, and "Check saved items" re-reads their price on the scrap.tf Buy Hats page instead of STN. They follow the same 60-minute rule.
+- The sidebar's trade queue summary (ACTIVE ITEM / WORKFLOW / ...) named STN for every purchase. It now shows "BUYING FROM: scrap.tf" or "STN" and uses that site in its labels (items accepted, Steam offer, purchase step) and in the status/timeout messages.
 
 V0.7.113 changes:
 - scrap.tf purchases use the same accept / Mac-confirm / sound steps as STN purchases: the Steam offer scrap.tf creates is accepted by TF2 Metal Trader, the Mac confirmer is asked to approve the mobile confirmation, middle1.wav plays when the accept goes through and more of the purchase is still to come, middle2.wav when it was the last (and again after the last Backpack.tf offer is sent), hit.mp3 announces the deal and the end sound closes the scan.

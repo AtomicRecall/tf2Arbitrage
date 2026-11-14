@@ -48,6 +48,15 @@
 .source-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
 .source-badge.stn{background:linear-gradient(#3b6ea8,#244567)}
 .source-badge.scrap{background:linear-gradient(#a96825,#704719)}
+.checked-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;background:linear-gradient(#6b6b6b,#454545);font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
+.result.already-checked{opacity:.8;border-left-color:#8a8a8a}
+.checked-row{margin:4px 0;padding:6px 8px;background:linear-gradient(90deg,#3a3a3a,#2b2b2b);border:1px solid #111;border-left:3px solid #777}
+.checked-row.good{border-left-color:#7fc34a}
+.checked-row.not-good{border-left-color:#c94a42}
+.checked-top{display:flex;align-items:center;gap:6px}
+.checked-name{flex:1;min-width:0;font-size:11px;font-weight:bold;word-break:break-word}
+.checked-top .source-badge{margin-left:0}
+.checked-timer{flex:none;font-size:9px;color:#e6b04f}
 .bought-summary{display:flex;gap:6px;margin-bottom:8px}
 .bought-summary>div{flex:1;padding:8px;background:#383838;border:1px solid #111;border-top-color:#666;border-left-color:#666;text-align:center}
 .bought-summary b,.bought-summary span{display:block}
