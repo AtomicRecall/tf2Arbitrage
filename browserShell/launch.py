@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Launches the TF2 Trader browser: Firefox with a dedicated profile, both
 bot add-ons preinstalled, the trade analyzer in the sidebar, the STN hats page
-as the home page, and the confirmation server running beside it.
+and the scrap.tf hats page as the start tabs, and the confirmation server running
+beside it.
 
   python3 browserShell/launch.py                 # normal start
   python3 browserShell/launch.py --dry-run       # prepare the profile, print what would run
@@ -42,10 +43,15 @@ SERVER_CONFIG = ROOT / "macConfirmer" / "server_config.json"
 ANALYZER_FOLDER = "tf2_trade_arbitrage_prototype"
 BUNDLED_CONFIG_NAME = "mac-confirmer.json"
 
-HOME_URL = (
+STN_HATS_URL = (
     "https://stntrading.eu/tf2/hats"
     "?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1"
 )
+# scrap.tf's Buy Hats page (it needs a Steam login). Both pages are opened as
+# tabs on start (and are the home page, separated by "|"); "Scan current page"
+# works on whichever tab is in front.
+SCRAP_HATS_URL = "https://scrap.tf/hats"
+HOME_URL = f"{STN_HATS_URL}|{SCRAP_HATS_URL}"
 
 # Release Firefox refuses unsigned add-ons; these builds can run them.
 MAC_FIREFOX_CANDIDATES = [
@@ -214,7 +220,7 @@ def main():
     prepare_profile(args.profile)
 
     firefox = find_firefox(args.firefox)
-    command = [firefox or "firefox", "-profile", str(args.profile), "--no-remote", HOME_URL]
+    command = [firefox or "firefox", "-profile", str(args.profile), "--no-remote", STN_HATS_URL, SCRAP_HATS_URL]
     if args.dry_run:
         print("Would run:", " ".join(f'"{part}"' if " " in part else part for part in command))
         print("Would start:", SERVER_SCRIPT, "(skipped)" if args.no_server else "")

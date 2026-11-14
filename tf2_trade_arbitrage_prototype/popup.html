@@ -23,7 +23,7 @@
   </label>
   <div id="tradeStatus" class="trade-status" role="status" aria-live="polite">Automatic trading is off. Enable it to execute future Good Trades.</div>
   <details id="steamApiSettings" class="api-settings" open>
-    <summary>Steam Web API key (required for STN purchase checks)</summary>
+    <summary>Steam Web API key (required for STN and scrap.tf purchase checks)</summary>
     <p class="api-key-info">The key is stored in this extension's local storage and used by its background script to query Steam directly. It is never sent to page scripts. Do not share it in chat. Mobile confirmation remains manual.</p>
     <p class="api-key-info"><a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">Create or view your Steam Web API key</a></p>
     <label for="steamApiKey">Steam Web API key</label>
@@ -36,7 +36,7 @@
   </details>
   <label class="automation-toggle">
     <input id="keepLogins" type="checkbox" checked>
-    <span>Stay signed in after restarting the browser (keeps the login cookies of Steam, STN and backpack.tf for 30 days)</span>
+    <span>Stay signed in after restarting the browser (keeps the login cookies of Steam, STN, scrap.tf and backpack.tf for 30 days)</span>
   </label>
   <details id="macSettings" class="api-settings">
     <summary>Mac confirmer (accepts Steam mobile confirmations for bot offers)</summary>
@@ -58,9 +58,20 @@
   <div class="hint">STN purchase completion is verified through the Steam Web API for the exact offer ID. Only trade_offer_state 3 (Accepted) counts as complete; state 9 (CreatedNeedsConfirmation) and state 11 (InEscrow) do not. Approve mobile confirmations yourself. Acceptance of outgoing bot offers is not tracked.</div>
   <button id="scan">Scan current page</button>
   <button id="stop" class="secondary">Stop</button>
+  <label class="automation-toggle">
+    <input id="scrapSkipCraft" type="checkbox" checked>
+    <span>scrap.tf: skip the Craft Hats section (hundreds of 1.77 ref hats that are almost never profitable)</span>
+  </label>
+  <button id="scanSaved" class="secondary" type="button" title="Opens each saved item on stntrading.eu and Backpack.tf and checks it again">Check saved items (0)</button>
+  <details id="savedTradesBox" class="api-settings">
+    <summary>Saved Good Trades (<span id="savedCount">0</span>)</summary>
+    <p class="api-key-info">Every item found to be a Good Trade is saved here, in this browser only. “Check saved items” opens each one on stntrading.eu (current price and stock) and Backpack.tf (Buy Orders) and runs the normal check. Items stay saved until you remove them.</p>
+    <div id="savedList"></div>
+    <button id="clearSaved" class="secondary" type="button">Remove all saved items</button>
+  </details>
   <div class="hint">Progress is saved automatically when this popup closes. Dismissed items stay dismissed until restored.</div>
   <div class="hint">Backpack.tf scan pages, Steam offer checks, STN purchases and the Steam offers that follow them open in a separate “TF2 Arbitrage Scanner” window that closes when everything is finished. Scanning pauses while a trade runs in it. Keep it open and visible (not minimized); your main window is left alone, except for the Backpack.tf pages that are highlighted for you.</div>
-  <div id="status">Open your TF2 marketplace page first.</div>
+  <div id="status">Open your TF2 marketplace page (stntrading.eu, or scrap.tf/buy/hats) first.</div>
   <div class="summary">
     <div><b id="total">0</b><span>items</span></div>
     <div><b id="checked">0</b><span>checked</span></div>

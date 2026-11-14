@@ -4,6 +4,7 @@ const api=typeof browser!=="undefined"?browser:chrome;
 if(new URLSearchParams(location.search).get("mode")==="sidebar")document.documentElement.classList.add("sidebar");
 const $=id=>document.getElementById(id);
 const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
+const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
@@ -211,7 +212,7 @@ function renderResult(r,prepend=true){
       html+=`</div>`;
     }
   }
-  if(source.href)html+=`<div class="market-actions"><a class="market-link" href="${esc(source.href)}" target="_blank" rel="noopener">Open STN marketplace</a></div>`;
+  if(source.href)html+=`<div class="market-actions"><a class="market-link" href="${esc(source.href)}" target="_blank" rel="noopener">${source.source==="scrap.tf"?"Open scrap.tf (buy hats)":"Open STN marketplace"}</a></div>`;
   if(r.deal){
     html+=`<div class="market-actions trade-actions"><button class="market-action-button open-backpack-verified"${verifiedOfferCount?"":' disabled'}>Backpack.tf — highlight ${verifiedOfferCount} verified</button><button class="market-action-button force-auto-trade"${verifiedOfferCount?"":' disabled title="No offer was verified to have enough metal"'}>Auto trade (skip STN)</button></div>`;
   }
@@ -424,6 +425,9 @@ clearSteamApiKey.onclick=async()=>{
 };
 
 // ---- Stay signed in (cookie-keeper.js reads this setting) ----------------
+const scrapSkipCraft=$("scrapSkipCraft");
+api.storage.local.get({scrapSkipCraft:true},v=>{scrapSkipCraft.checked=v.scrapSkipCraft!==false});
+scrapSkipCraft.onchange=()=>{storageSetLocal({scrapSkipCraft:scrapSkipCraft.checked}).catch(()=>{})};
 const keepLogins=$("keepLogins");
 api.storage.local.get({keepLogins:true},v=>{keepLogins.checked=v.keepLogins!==false});
 keepLogins.onchange=()=>{storageSetLocal({keepLogins:keepLogins.checked}).catch(()=>{})};
@@ -535,9 +539,11 @@ volume.oninput=()=>{
   send({type:"SET_VOLUME",volume:v/100});
 };
 
-scan.onclick=async()=>{
+scan.onclick=()=>startScan("START_SCAN");
+scanSaved.onclick=()=>startScan("START_SAVED_SCAN");
+async function startScan(type){
   api.storage.local.set({keyRate:+rate.value||63});
-  const r=await send({type:"START_SCAN",keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
+  const r=await send({type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
   if(!r?.ok){status.textContent=r?.error||"Could not start scan.";return}
   results.innerHTML="";
   unverifiedResults.innerHTML="";
@@ -548,7 +554,7 @@ scan.onclick=async()=>{
   deals.textContent="0";
   total.textContent=r.total;
   status.textContent=`Checking 0 / ${r.total} items...`;
-};
+}
 stop.onclick=async()=>{await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`};
 
 api.runtime.onMessage.addListener(async m=>{
@@ -574,4 +580,51 @@ api.storage.onChanged?.addListener((changes,area)=>{
   const value=changes.tf2ArbTraderHistory.newValue;
   traderHistory=value&&typeof value==="object"?value:{};
   renderTraders();
+});
+
+// ---- Saved Good Trades (the local database kept by background.js) -----------
+const SAVED_KEY="savedTrades";
+let savedTrades={};
+function stnItemUrl(name){return `https://stntrading.eu/item/tf2/${encodeURIComponent(String(name||"").trim()).replace(/%20/g,"+")}`}
+function savedStatusText(entry){
+  const when=entry.lastCheckedAt?new Date(entry.lastCheckedAt).toLocaleString():"";
+  if(entry.lastStatus==="good")return entry.lastCheckedAt?`Still a Good Trade (${when})`:"Good Trade when saved";
+  if(entry.lastStatus==="not-good")return `Not a Good Trade when checked ${when}`;
+  if(entry.lastStatus==="skipped")return `Could not check (${when}): ${entry.lastNote||"skipped"}`;
+  return "";
+}
+function renderSaved(){
+  const entries=Object.values(savedTrades).filter(entry=>entry&&entry.name).sort((a,b)=>(b.lastGoodAt||0)-(a.lastGoodAt||0));
+  savedCount.textContent=String(entries.length);
+  scanSaved.textContent=`Check saved items (${entries.length})`;
+  scanSaved.disabled=!entries.length;
+  clearSaved.disabled=!entries.length;
+  savedList.innerHTML=entries.length?"":`<div class="hint">Nothing saved yet.</div>`;
+  for(const entry of entries){
+    const row=document.createElement("div");
+    row.className="saved-row";
+    const profit=Number.isFinite(entry.profitRef)?` · +${entry.profitRef.toFixed(2)} ref`:"";
+    row.innerHTML=`<div class="saved-name"><a href="${esc(stnItemUrl(entry.name))}" target="_blank" rel="noopener">${esc(entry.name)}</a><button class="secondary saved-remove" type="button" title="Remove from the saved items">Remove</button></div>`+
+      `<div class="line">Buy ${esc(entry.buyPrice||"?")} → sell ${esc(entry.sellPrice||"?")}${esc(profit)}</div>`+
+      `<div class="line reason">${esc(savedStatusText(entry))}</div>`;
+    row.querySelector(".saved-remove").onclick=()=>{
+      delete savedTrades[String(entry.name).trim().replace(/\s+/g," ").toLowerCase()];
+      renderSaved();
+      api.storage.local.set({[SAVED_KEY]:savedTrades});
+    };
+    savedList.appendChild(row);
+  }
+}
+clearSaved.onclick=()=>{
+  if(!window.confirm("Remove every saved item?"))return;
+  savedTrades={};
+  renderSaved();
+  api.storage.local.set({[SAVED_KEY]:savedTrades});
+};
+api.storage.local.get({[SAVED_KEY]:{}},v=>{savedTrades=v[SAVED_KEY]&&typeof v[SAVED_KEY]==="object"?v[SAVED_KEY]:{};renderSaved()});
+api.storage.onChanged?.addListener((changes,area)=>{
+  if(area!=="local"||!changes[SAVED_KEY])return;
+  const value=changes[SAVED_KEY].newValue;
+  savedTrades=value&&typeof value==="object"?value:{};
+  renderSaved();
 });

@@ -39,3 +39,8 @@
 .api-key-status{margin-top:5px;color:#aaa;font-size:9px;line-height:1.4}
 .api-key-status.saved{color:#9bd85e}
 .api-key-status.error{color:#e36b62}html.sidebar,html.sidebar body{width:auto;min-width:300px;height:100%}html.sidebar body{padding:10px}html.sidebar .tab{font-size:8.5px}
+
+.saved-row{border:1px solid #333;border-radius:6px;padding:6px 8px;margin:6px 0}
+.saved-name{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
+.saved-name a{color:inherit;text-decoration:underline;word-break:break-word}
+.saved-remove{padding:2px 8px;font-size:11px;flex:none}

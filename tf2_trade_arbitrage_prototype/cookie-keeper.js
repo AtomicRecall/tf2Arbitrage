@@ -1,7 +1,7 @@
 // Keeps logins across browser restarts.
 //
 // Firefox discards "session" cookies (no expiry date) when it quits, unless it
-// is restoring the previous session. Steam, STN and backpack.tf keep parts of a
+// is restoring the previous session. Steam, STN, scrap.tf and backpack.tf keep parts of a
 // login in such cookies, and this browser opens on a fixed home page instead of
 // restoring tabs, so those logins would be lost every time. This turns session
 // cookies of the sites below into cookies that last KEEP_SECONDS.
@@ -10,7 +10,7 @@
 // are ignored, only newly set session cookies are made persistent.
 (function(root){
   const api=typeof browser!=="undefined"?browser:(typeof chrome!=="undefined"?chrome:null);
-  const KEEP_DOMAINS=["steamcommunity.com","steampowered.com","stntrading.eu","backpack.tf"];
+  const KEEP_DOMAINS=["steamcommunity.com","steampowered.com","stntrading.eu","scrap.tf","backpack.tf"];
   const KEEP_SECONDS=30*24*60*60;
   const SETTING_KEY="keepLogins";
 

@@ -1,7 +1,7 @@
 # TF2 Trader browser (Firefox with the bot built in)
 
-A dedicated Firefox profile that opens on the STN hats listing, has the bot's
-analyzer permanently in the sidebar, preinstalls both add-ons, and starts the
+A dedicated Firefox profile that opens on the STN hats listing and on scrap.tf's
+Buy Hats page (two tabs), has the bot's analyzer permanently in the sidebar, preinstalls both add-ons, and starts the
 Mac confirmation server alongside it.
 
 ## One-time setup (Mac)
@@ -17,7 +17,7 @@ Mac confirmation server alongside it.
    python3 browserShell/launch.py --server-dry-run
    ```
 
-5. In the browser, sign in to Steam, backpack.tf and stntrading.eu (the browser keeps you signed in
+5. In the browser, sign in to Steam, backpack.tf, stntrading.eu and scrap.tf (the browser keeps you signed in
    after restarts), and enter your Steam Web API key and key rate in the sidebar. The **Mac confirmer**
    settings are filled in for you: the launcher creates the server's token, hands it to the add-on, and
    enables it. Open the Mac confirmer section and press **Test connection** to check it. You can switch
@@ -34,6 +34,15 @@ Mac confirmation server alongside it.
 
 Both start the real server (clicks on). For the dry run in step 4, use `python3 browserShell/launch.py --server-dry-run`.
 Close Firefox to stop everything.
+
+## Scanning and buying on scrap.tf
+
+Everything that works on Windows works the same here: the add-on is the same code, only the browser
+and the confirmer are different. To use scrap.tf, select its tab (`https://scrap.tf/hats`, signed in to
+Steam) and press **Scan current page** in the sidebar. With "Automatically buy items and send bot offers"
+on, a Good Trade is bought on scrap.tf (item selected, cart button pressed, the Steam offer scrap.tf
+sends is accepted), and the Mac confirmer then approves the mobile confirmation like it does for STN.
+The Craft Hats section is skipped by default (checkbox in the sidebar).
 
 ## What the sidebar does
 

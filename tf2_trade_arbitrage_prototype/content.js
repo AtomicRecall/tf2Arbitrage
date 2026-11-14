@@ -12,6 +12,7 @@
   };
 
   function readBuyPage(){
+    if(isScrapTf())return readScrapTfPage();
     const nodes=[...document.querySelectorAll("a.mp-item-box-wrap")];
     const items=[];
     for(const node of nodes){
@@ -23,6 +24,191 @@
       items.push({name,price,stock:s?Number(s.textContent.trim()):null,href:node.getAttribute("href")||""});
     }
     return items;
+  }
+
+  // ---- scrap.tf ("Buy Hats" page, https://scrap.tf/buy/hats, needs a Steam login)
+  // Every item for sale is a <div class="item" data-item-value="<scrap>"> inside
+  // #buy-container (the user's own backpack is in #sell-container and ignored).
+  // data-title holds the name as HTML, the quality is a "quality<N>" class, the
+  // visible price ("5 keys, 53 ref") is in .item-value-indicator and the number
+  // for sale in data-num-available.
+  function isScrapTf(){return /(?:^|\.)scrap\.tf$/i.test(location.hostname)}
+  const SCRAP_QUALITY_PREFIX={1:"Genuine",3:"Vintage",13:"Haunted",14:"Collector's"};
+  function scrapItemQuality(node){
+    return Number((String(node.className).match(/\bquality(\d+)\b/)||[])[1])||0;
+  }
+  function scrapItemName(node){
+    let name=new DOMParser().parseFromString(node.getAttribute("data-title")||"","text/html").body.textContent
+      .trim().replace(/\s+/g," ");
+    // Strange items already carry "Strange " in the title; Genuine, Vintage and
+    // the like do not, and Backpack.tf needs the quality.
+    const prefix=SCRAP_QUALITY_PREFIX[scrapItemQuality(node)];
+    if(name&&prefix&&!name.toLowerCase().startsWith(prefix.toLowerCase()+" "))name=prefix+" "+name;
+    return name;
+  }
+  function readScrapTfPage(){
+    const nodes=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
+    const cheapest=new Map();
+    for(const node of nodes){
+      // Unusuals need their effect to be found on Backpack.tf and scrap.tf does
+      // not name it, so they cannot be compared.
+      if(scrapItemQuality(node)===5)continue;
+      const name=scrapItemName(node);
+      const value=Number(node.getAttribute("data-item-value"));
+      const price=(node.querySelector(".item-value-indicator")?.textContent||"").trim().replace(/\s+/g," ");
+      if(!name||!Number.isFinite(value)||!/(?:keys?|ref)/i.test(price))continue;
+      const stock=Number(node.getAttribute("data-num-available"));
+      let header=node.closest(".banking-category");
+      while(header&&!header.classList.contains("items-category-header"))header=header.previousElementSibling;
+      const key=normalizeName(name);
+      const previous=cheapest.get(key);
+      // The same item can be listed twice (for example one discounted copy);
+      // only the cheapest copy matters for the comparison.
+      if(previous&&previous.scrapValue<=value)continue;
+      cheapest.set(key,{
+        name,price,
+        stock:Number.isFinite(stock)&&stock>0?stock:1,
+        href:location.href.split("#")[0],
+        source:"scrap.tf",
+        category:header?.textContent.trim()||"",
+        scrapValue:value
+      });
+    }
+    return [...cheapest.values()];
+  }
+
+  // ---- scrap.tf buying. The page is driven the way a person would: click the
+  // item (once per copy wanted), then the cart button (#trade-btn). scrap.tf then
+  // queues the trade: ".mm-queue-processing" is shown while it prepares it and
+  // ".mm-queue-ready" once its bot has sent the Steam offer. The offer id is the
+  // page's own ScrapTF.NewQueue.TradeOfferID, which is what its "Open Trade
+  // Offer" button opens; the background script opens that offer itself.
+  const scrapSleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  function scrapShown(el){
+    if(!el||!el.getClientRects().length)return false;
+    const style=getComputedStyle(el);
+    return style.display!=="none"&&style.visibility!=="hidden";
+  }
+  function scrapSelection(){
+    return [...document.querySelectorAll(".selected-item")]
+      .filter(node=>!node.closest("#sell-container"))
+      .map(node=>({
+        node,
+        name:scrapItemName(node),
+        count:Math.max(1,parseInt(node.getAttribute("data-num-selected")||"1",10)||1),
+        value:Number(node.getAttribute("data-item-value"))
+      }));
+  }
+  function scrapSelectedCount(){return scrapSelection().reduce((sum,entry)=>sum+entry.count,0)}
+  async function scrapBuy(name,quantity,maxScrapValue){
+    const wanted=Math.max(1,Math.floor(Number(quantity))||1);
+    const target=normalizeName(name);
+    const allTiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
+    if(!allTiles.length){
+      return {ok:false,status:"not-ready",reason:"The scrap.tf item list is not on the page (still loading, or you are not signed in to scrap.tf)."};
+    }
+    let tiles=allTiles
+      .filter(node=>normalizeName(scrapItemName(node))===target)
+      .sort((a,b)=>Number(a.getAttribute("data-item-value"))-Number(b.getAttribute("data-item-value")));
+    if(!tiles.length)return {ok:false,reason:`${name} is no longer listed on scrap.tf.`};
+    const limit=Number(maxScrapValue);
+    if(Number.isFinite(limit)&&limit>0){
+      const cheap=tiles.filter(node=>Number(node.getAttribute("data-item-value"))<=limit);
+      if(!cheap.length){
+        const now=Number(tiles[0].getAttribute("data-item-value"));
+        return {ok:false,reason:`The scrap.tf price of ${name} rose to ${now} scrap (it was ${limit} scrap when it was checked). Not buying.`};
+      }
+      tiles=cheap;
+    }
+    // Nothing may be selected already (for example left over from a reload).
+    if(scrapSelectedCount()>0)return {ok:false,reason:"Items were already selected on the scrap.tf page. Not buying."};
+
+    let selected=0;
+    for(const tile of tiles){
+      if(selected>=wanted)break;
+      if(tile.classList.contains("itemgroup-invalid-bot"))continue;
+      // A tile that stands for several copies takes one click per copy. A
+      // single copy is toggled by its click, so it must only be clicked once.
+      const grouped=tile.hasAttribute("data-item-group-hash");
+      const available=grouped?Math.max(1,parseInt(tile.getAttribute("data-num-available")||"1",10)||1):1;
+      const room=Math.min(available,wanted-selected);
+      for(let index=0;index<room;index++){
+        const before=scrapSelectedCount();
+        tile.click();
+        await scrapSleep(180);
+        // scrap.tf stops accepting copies when no single bot holds that many;
+        // the rest is bought in a later batch.
+        if(scrapSelectedCount()<=before)break;
+        selected++;
+      }
+    }
+    const chosen=scrapSelection();
+    const foreign=chosen.find(entry=>normalizeName(entry.name)!==target);
+    if(foreign)return {ok:false,reason:`scrap.tf selected "${foreign.name}" instead of ${name}. Not buying.`};
+    const selectedCount=scrapSelectedCount();
+    if(!selectedCount)return {ok:false,reason:`scrap.tf would not let ${name} be selected (it may have just been sold or reserved).`};
+    const button=document.querySelector("#trade-btn");
+    if(!button||button.disabled||button.classList.contains("disabled")){
+      return {ok:false,reason:"scrap.tf's checkout button is not available (not enough metal in your backpack, or the item cannot be bought)."};
+    }
+    button.click();
+    return {ok:true,selected:selectedCount};
+  }
+  function scrapTradeOfferId(){
+    let id="";
+    try{id=String(window.wrappedJSObject?.ScrapTF?.NewQueue?.TradeOfferID??"")}catch(error){id=""}
+    if(!(Number(id)>0)){
+      // The page object is not reachable from here: let the page copy the id to
+      // an attribute the content script can read.
+      try{
+        const script=document.createElement("script");
+        script.textContent='document.documentElement.setAttribute("data-tf2arb-scrap-offer",String(window.ScrapTF&&ScrapTF.NewQueue?ScrapTF.NewQueue.TradeOfferID:""))';
+        document.documentElement.appendChild(script);
+        script.remove();
+        id=document.documentElement.getAttribute("data-tf2arb-scrap-offer")||"";
+      }catch(error){id=""}
+    }
+    return Number(id)>0?String(Math.floor(Number(id))):"";
+  }
+  function scrapQueueState(){
+    const compact=text=>String(text||"").replace(/\s+/g," ").trim().slice(0,300);
+    const modal=document.querySelector("#generic-modal");
+    if(scrapShown(modal)&&modal.querySelector(".flat-dialog.dia-error")){
+      return {status:"error",text:compact(modal.querySelector(".flat-dialog-inside")?.textContent)||"scrap.tf reported a trade error."};
+    }
+    const crouton=document.querySelector(".crouton");
+    if(scrapShown(crouton)&&crouton.classList.contains("alert-error")){
+      return {status:"error",text:compact(crouton.textContent)||"scrap.tf reported an error."};
+    }
+    if(scrapShown(document.querySelector(".mm-queue-ready"))){
+      if(!scrapShown(document.querySelector(".mm-queue-trade-confirmed")))return {status:"confirming"};
+      return {status:"ready",offerId:scrapTradeOfferId()};
+    }
+    if(scrapShown(document.querySelector(".mm-queue-processing"))){
+      return {status:"processing",text:compact(document.querySelector(".mm-queue-status")?.textContent)};
+    }
+    return {status:"idle"};
+  }
+  function scrapCancelQueue(){
+    const button=[...document.querySelectorAll(".mm-queue-cancel")].find(scrapShown);
+    if(!button||button.disabled)return {ok:false};
+    button.click();
+    return {ok:true};
+  }
+
+  // An STN item page (/item/tf2/<name>) shows "Buy it for:" with the price in
+  // bold below it, then "<n> in Stock". Used to refresh a saved item's price.
+  function readStnItemPage(){
+    if(!/^(?:www\.)?stntrading\.eu$/i.test(location.hostname)||!location.pathname.startsWith("/item/")){
+      return {status:"failed",reason:"This is not an STN item page."};
+    }
+    const label=[...document.querySelectorAll("p")].find(p=>/^\s*buy it for\s*:?\s*$/i.test(p.textContent));
+    const box=label?.parentElement;
+    const price=box?.querySelector("b")?.textContent.trim().replace(/\s+/g," ")||"";
+    if(!price||!/(?:keys?|ref)/i.test(price))return {status:"loading",reason:"The STN price is not visible yet."};
+    const stockText=[...box.querySelectorAll("p")].map(p=>p.textContent).find(text=>/\bin stock\b/i.test(text))||"";
+    const stock=Number((stockText.match(/(\d+)\s*in stock/i)||[])[1]);
+    return {status:"ready",price,stock:Number.isFinite(stock)?stock:0};
   }
 
   function approx(text){
@@ -475,6 +661,28 @@
     return "";
   }
 
+  // A buyer who wants a special version of the item is not paying the plain
+  // price. Backpack.tf marks those listings with a badge next to the title (for
+  // example <small>Parts Attached</small>) and with data-part_name_N,
+  // data-spell_* and data-paint_* attributes on the item. Any of them means the
+  // listing is ignored.
+  function specialListingReason(listing,item){
+    for(const key of Object.keys(item.dataset||{})){
+      if(!item.dataset[key])continue;
+      if(/^part_name/i.test(key))return "parts attached";
+      if(/^spell/i.test(key))return "spells";
+      if(/^paint_(?:name|hex)$/i.test(key))return "paint";
+    }
+    for(const badge of listing.querySelectorAll(".listing-title small, .listing-title .label")){
+      const text=(badge.textContent||"").replace(/\s+/g," ").trim();
+      if(/\bparts?\b/i.test(text))return "parts attached";
+      if(/\bspell/i.test(text))return "spells";
+      if(/\bpaint/i.test(text))return "paint";
+      if(/\bfestiviz/i.test(text))return "festivized";
+    }
+    return "";
+  }
+
   function getMatchingListings(itemName,desiredSpec=null,priceSink=null){
     const target=normalizeName(itemName);
     const desiredQuality=desiredSpec?.quality||null;
@@ -556,6 +764,9 @@
       const negotiationAllowed=buttonTitle.includes("Negotiation is allowed.");
       const botLike=isBotBuyout&&!negotiationAllowed;
       if(!botLike)continue;
+
+      // Parts, spells, paint and the like make this a special-version order.
+      if(specialListingReason(listing,item))continue;
 
       // The listing title itself can contain specialization signals (for
       // example "B> LEVEL 100 ONLY"), so inspect it together with the
@@ -1247,7 +1458,11 @@
     const target=normalizeName(itemName);
     document.querySelectorAll(".tf2-arb-current-item").forEach(x=>x.classList.remove("tf2-arb-current-item"));
     let match=null;
-    for(const node of document.querySelectorAll("a.mp-item-box-wrap")){
+    if(isScrapTf()){
+      for(const node of document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")){
+        if(normalizeName(scrapItemName(node))===target){match=node;break}
+      }
+    }else for(const node of document.querySelectorAll("a.mp-item-box-wrap")){
       const nameNode=node.querySelector(".item-name");
       if(nameNode&&normalizeName(nameNode.textContent)===target){match=node;break}
     }
@@ -1349,6 +1564,21 @@
 
   api.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
     if(msg.type==="READ_BUY_PAGE")sendResponse({items:readBuyPage()});
+    if(msg.type==="SCRAP_BUY"){
+      if(!isScrapTf()){sendResponse({ok:false,reason:"This is not a scrap.tf page."});return}
+      scrapBuy(msg.name,msg.quantity,msg.maxScrapValue)
+        .then(sendResponse)
+        .catch(error=>sendResponse({ok:false,reason:error.message||String(error)}));
+      return true;
+    }
+    if(msg.type==="SCRAP_QUEUE_STATE"){
+      sendResponse(isScrapTf()?scrapQueueState():{status:"error",text:"This is not a scrap.tf page."});
+      return;
+    }
+    if(msg.type==="SCRAP_CANCEL_QUEUE"){
+      sendResponse(isScrapTf()?scrapCancelQueue():{ok:false});
+      return;
+    }
     if(msg.type==="QUICK_BUY_AMOUNT"){
       quickBuyAmount(msg.amount).then(sendResponse).catch(error=>sendResponse({ok:false,reason:error.message||String(error)}));
       return true;
@@ -1370,6 +1600,10 @@
         return;
       }
       sendResponse(getQuickBuyOptions());
+      return;
+    }
+    if(msg.type==="READ_STN_ITEM_PAGE"){
+      sendResponse(readStnItemPage());
       return;
     }
     if(msg.type==="HIGHLIGHT_MARKET_ITEM")sendResponse(highlightMarketItem(msg.itemName));

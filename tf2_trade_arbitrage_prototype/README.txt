@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.102
+Current version 0.7.110
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,25 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.110 changes:
+- scrap.tf purchases. With "Automatically buy items and send bot offers" on, a Good Trade found on scrap.tf is bought there instead of on STN: the scrap.tf tab is opened, the item is clicked once per copy wanted, the cart button (#trade-btn, ScrapTF.Hats.BuyWithMetal) is pressed and the add-on waits for scrap.tf's "Your trade is ready!" panel. The Steam offer it names (ScrapTF.NewQueue.TradeOfferID, what "Open Trade Offer" would open) is then opened in the scanner window and accepted by TF2 Metal Trader, the Steam Web API must report it Accepted (state 3), the Mac confirmer handles the mobile confirmation, and only then are the bot offers sent to the Backpack.tf buyers, exactly as for STN.
+- scrap.tf sometimes only lets part of a quantity be bought at once (one bot must hold every copy). The add-on buys what scrap.tf allows, finishes that trade, reloads the page and repeats until the full quantity is bought.
+- Safety checks before pressing the cart button: the scrap.tf price must not be higher than when it was scanned, nothing else may be selected, and the selected item must be the exact item. If scrap.tf then shows an error, or never prepares the trade, the queue entry is cancelled and no bot offers are sent.
+- macOS: the browser launcher (browserShell/launch.py) opens scrap.tf next to STN, and the login cookies of scrap.tf are kept across restarts like the other sites. The extension itself is identical on Windows and macOS.
+
+V0.7.109 changes:
+- Buy Orders for a special version of an item are ignored. A listing is skipped when Backpack.tf marks it "Parts Attached" (the small badge next to the title, or the part data on the item), or shows spells or paint. Before, a bot paying for a hat with strange parts could be mistaken for a plain buyer. This applies to every scan (STN and scrap.tf).
+
+V0.7.108 changes:
+- scrap.tf support: open https://scrap.tf/buy/hats (signed in) and press "Scan current page". The hats scrap.tf sells are read from the page (name, price in keys/ref, how many are for sale) and checked against Backpack.tf Buy Orders exactly like STN items, including the Steam offer check. A Good Trade shows the normal notification, titled "SCRAP.TF ARBITRAGE HIT", and the result links back to the scrap.tf page.
+- The Craft Hats section is skipped by default (hundreds of 1.77 ref hats); untick the new popup checkbox to include it. Unusual hats are skipped because scrap.tf does not name their effect. Genuine/Vintage/Haunted/Collector's hats get their quality added to the name.
+- scrap.tf finds are only reported for now: they are not bought automatically and are not added to the saved Good Trades list.
+
+V0.7.107 changes:
+- Every item found to be a Good Trade is saved to a local database (browser storage, key savedTrades; nothing is sent anywhere): name, buy and sell price, profit, when it was last good.
+- New "Check saved items" button and a "Saved Good Trades" list (with Remove buttons) in the popup/sidebar. The button opens each saved item's STN page (https://stntrading.eu/item/tf2/<name>) to read the current price and stock, then runs the normal Backpack.tf check and metal verification. Items STN no longer stocks are skipped; the list shows whether each item is still a Good Trade.
+- Results from a saved check go through the same path as a normal scan, so with automatic trading on, a Good Trade is bought and offered as usual.
 
 V0.7.106 changes:
 - The Mac confirmer is now also asked to confirm the STN purchase offer. Before, it was only asked for sent bot offers, so accepting the STN offer waited for a manual phone confirmation. It is asked as soon as the offer page says Steam needs the confirmation, or when the Web API reports state 9.

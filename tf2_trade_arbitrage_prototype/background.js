@@ -826,6 +826,105 @@ async function openStnPurchaseBatch(job,batchNumber,remaining){
   return {amount,offerUrl};
 }
 
+// ---- scrap.tf purchase --------------------------------------------------------
+// Opens the scrap.tf Buy Hats page the item was found on, selects the item and
+// presses the cart button, then waits until scrap.tf's bot has sent its Steam
+// trade offer (the "Your trade is ready!" panel) and returns that offer. The
+// offer is then accepted and verified exactly like an STN purchase offer.
+const SCRAP_QUEUE_TIMEOUT_MS=360000;
+const SCRAP_IDLE_TIMEOUT_MS=60000;
+
+async function cancelScrapQueue(tabId){
+  try{if(Number.isInteger(tabId)&&await tabStillExists(tabId))await msgTab(tabId,{type:"SCRAP_CANCEL_QUEUE"})}
+  catch(error){console.warn("Could not cancel the scrap.tf queue entry:",error)}
+}
+
+async function openScrapPurchaseBatch(job,batchNumber,remaining,apiKey){
+  let pageUrl=null;
+  try{pageUrl=new URL(String(job.scrapUrl||""))}catch(error){}
+  if(!pageUrl||!/(?:^|\.)scrap\.tf$/i.test(pageUrl.hostname))pageUrl=new URL("https://scrap.tf/hats");
+  pageUrl.hash="";
+  // The offers Steam already lists, in case the offer id cannot be read from
+  // the scrap.tf page itself.
+  const knownOffers=new Set();
+  try{for(const offer of await fetchSteamReceivedOffers(apiKey))knownOffers.add(String(offer.tradeofferid))}
+  catch(error){console.warn("Could not list the existing Steam offers:",error)}
+
+  const {tab,loaded}=await openJobTransactionPage(job,pageUrl.href,30000);
+  if(!loaded)throw new Error("scrap.tf did not finish loading the Buy Hats page.");
+  emitTradeAutomationStatus(`scrap.tf batch ${batchNumber}: selecting ${remaining} ${job.name} and pressing the cart button…`);
+
+  let selection=null;
+  const pageDeadline=Date.now()+45000;
+  while(Date.now()<pageDeadline){
+    if(!await tabStillExists(tab.id))throw new Error("The scrap.tf tab closed before the item could be selected.");
+    selection=await getTabMessageWithRetry(tab.id,{
+      type:"SCRAP_BUY",
+      name:job.name,
+      quantity:remaining,
+      maxScrapValue:job.maxScrapValue
+    },10000);
+    if(selection?.status!=="not-ready")break;
+    await sleep(1000);
+  }
+  if(!selection?.ok)throw new Error(selection?.reason||"scrap.tf could not select the item.");
+  const amount=Math.max(1,Number(selection.selected)||1);
+  emitTradeAutomationStatus(`scrap.tf batch ${batchNumber}: ${amount} ${job.name} added to the cart. Waiting for scrap.tf to prepare the trade…`);
+
+  let succeeded=false;
+  try{
+    const startedAt=Date.now();
+    const deadline=startedAt+SCRAP_QUEUE_TIMEOUT_MS;
+    let lastText="";
+    let sawQueue=false;
+    let offerId="";
+    while(Date.now()<deadline){
+      if(!await tabStillExists(tab.id))throw new Error("The scrap.tf tab closed before the trade offer was ready.");
+      let state=null;
+      try{state=await msgTab(tab.id,{type:"SCRAP_QUEUE_STATE"})}
+      catch(error){await sleep(500);continue}
+      if(state?.status==="error")throw new Error(`scrap.tf reported: ${state.text}`);
+      if(state?.status==="ready"){
+        sawQueue=true;
+        offerId=String(state.offerId||"");
+        break;
+      }
+      if(state?.status==="processing"||state?.status==="confirming"){
+        sawQueue=true;
+        const text=state.status==="confirming"?"scrap.tf is confirming the trade…":(state.text||"");
+        if(text&&text!==lastText){
+          lastText=text;
+          emitTradeAutomationStatus(`scrap.tf batch ${batchNumber}: ${text}`);
+        }
+      }else if(!sawQueue&&Date.now()-startedAt>SCRAP_IDLE_TIMEOUT_MS){
+        throw new Error("scrap.tf never started preparing the trade after the cart button was pressed.");
+      }
+      await sleep(700);
+    }
+    if(!sawQueue)throw new Error("scrap.tf did not start the trade.");
+    if(!offerId){
+      // The page's offer id was not readable: take the new offer Steam lists.
+      const lookupDeadline=Date.now()+30000;
+      while(!offerId&&Date.now()<lookupDeadline){
+        try{
+          const fresh=(await fetchSteamReceivedOffers(apiKey))
+            .filter(offer=>!knownOffers.has(String(offer.tradeofferid))&&[2,9].includes(Number(offer.trade_offer_state)))
+            .sort((a,b)=>Number(b.time_created||0)-Number(a.time_created||0));
+          if(fresh.length)offerId=String(fresh[0].tradeofferid);
+        }catch(error){console.warn("Could not look for the scrap.tf offer:",error)}
+        if(!offerId)await sleep(2000);
+      }
+    }
+    if(!/^\d+$/.test(offerId))throw new Error("scrap.tf said the trade is ready, but its Steam offer could not be identified.");
+    succeeded=true;
+    emitTradeAutomationStatus(`scrap.tf batch ${batchNumber}: trade ready, Steam offer #${offerId} for ${amount} ${job.name}. Opening it now…`);
+    return {amount,offerUrl:new URL(`https://steamcommunity.com/tradeoffer/${offerId}/`)};
+  }finally{
+    // Leave nothing queued on scrap.tf when this attempt did not finish.
+    if(!succeeded)await cancelScrapQueue(tab.id);
+  }
+}
+
 async function acceptStnPurchaseBatch(job,batchNumber,batchAmount,rawOfferUrl,steamApiKey){
   const purchaseOfferUrl=validSteamIncomingTradeUrl(rawOfferUrl);
   if(!purchaseOfferUrl)throw new Error(`STN returned an unsupported Steam offer for purchase batch ${batchNumber}.`);
@@ -1279,11 +1378,12 @@ async function executeTradeJob(job){
   job.purchasedQuantity=0;
   job.purchaseOfferIds=[];
   job.usedAssetIds=[];
+  const sellerLabel=job.source==="scrap.tf"?"scrap.tf":"STN";
   if(!job.skipPurchase){
     steamApiKey=await loadSteamWebApiKey();
-    emitTradeAutomationStatus("Checking Steam Web API access before placing an STN QuickBuy…");
+    emitTradeAutomationStatus(`Checking Steam Web API access before buying from ${sellerLabel}…`);
     await fetchSteamReceivedOffers(steamApiKey);
-    emitTradeAutomationStatus("Steam Web API access is ready. STN purchase offers will be verified by their exact numeric state.");
+    emitTradeAutomationStatus(`Steam Web API access is ready. ${sellerLabel} purchase offers will be verified by their exact numeric state.`);
   }
   if(job.skipPurchase){
     job.step="using-existing-inventory";
@@ -1297,11 +1397,15 @@ async function executeTradeJob(job){
       job.purchaseOfferId="";
       job.purchaseTabId=null;
       job.step="stn-purchase";
-      emitTradeAutomationStatus(`Reading STN QuickBuy quantities for ${remaining} remaining ${job.name}…`);
+      emitTradeAutomationStatus(job.source==="scrap.tf"
+        ?`Buying ${remaining} remaining ${job.name} on scrap.tf…`
+        :`Reading STN QuickBuy quantities for ${remaining} remaining ${job.name}…`);
       let purchaseBatch=null;
       for(let attempt=1;!purchaseBatch;attempt++){
         try{
-          purchaseBatch=await openStnPurchaseBatch(job,batchNumber,remaining);
+          purchaseBatch=job.source==="scrap.tf"
+            ?await openScrapPurchaseBatch(job,batchNumber,remaining,steamApiKey)
+            :await openStnPurchaseBatch(job,batchNumber,remaining);
         }catch(error){
           // STN refused the request before creating any offer (for example
           // "Some items in your selection were reserved by other users"), so
@@ -1311,12 +1415,12 @@ async function executeTradeJob(job){
           await sleep(4000*attempt);
         }
       }
-      emitTradeAutomationStatus(`STN batch ${batchNumber}: STN created Steam offer #${stnOfferIdFromUrl(purchaseBatch.offerUrl.href)} for ${purchaseBatch.amount} ${job.name}. Opening it now…`);
+      emitTradeAutomationStatus(`${sellerLabel} batch ${batchNumber}: ${sellerLabel} created Steam offer #${stnOfferIdFromUrl(purchaseBatch.offerUrl.href)} for ${purchaseBatch.amount} ${job.name}. Opening it now…`);
       await acceptStnPurchaseBatch(job,batchNumber,purchaseBatch.amount,purchaseBatch.offerUrl,steamApiKey);
       job.purchasedQuantity+=purchaseBatch.amount;
       // (The middle1/middle2 sound for this trade already played when the
       // accept went through, inside acceptStnPurchaseBatch.)
-      emitTradeAutomationStatus(`Confirmed STN batch ${batchNumber}: Steam Web API state 3 accepted ${job.purchasedQuantity}/${job.quantity} ${job.name} item${job.purchasedQuantity===1?"":"s"}.`);
+      emitTradeAutomationStatus(`Confirmed ${sellerLabel} batch ${batchNumber}: Steam Web API state 3 accepted ${job.purchasedQuantity}/${job.quantity} ${job.name} item${job.purchasedQuantity===1?"":"s"}.`);
       // A cancelled bot offer takes priority over the next STN batch.
       await runPendingResends(job);
     }
@@ -1463,6 +1567,8 @@ const inFlightSnapshots=new WeakMap();
 function enqueueTradeJob(result,options={}){
   const forceManual=options.forceManual===true;
   const skipPurchase=forceManual&&options.skipPurchase===true;
+  const fromScrapTf=result?.source==="scrap.tf";
+  const sellerLabel=fromScrapTf?"scrap.tf":"STN";
   if((!tradeAutomationEnabled&&!forceManual)||!result?.deal){
     return {ok:false,reason:"Automatic trade execution is not enabled for this result."};
   }
@@ -1528,11 +1634,11 @@ function enqueueTradeJob(result,options={}){
     quantity=totalListingItemQuantity(listings);
     stockLimited=true;
     if(quantity<=0){
-      const reason="STN currently has no stock available for this item.";
+      const reason=`${sellerLabel} currently has no stock available for this item.`;
       emitTradeAutomationStatus(`Not queued ${result.name}: ${reason}`);
       return {ok:false,reason};
     }
-    emitTradeAutomationStatus(`STN stock is limited to ${availableStock}; reducing this job to ${quantity} item${quantity===1?"":"s"} and selling only that available quantity across the verified bot listings.`);
+    emitTradeAutomationStatus(`${sellerLabel} stock is limited to ${availableStock}; reducing this job to ${quantity} item${quantity===1?"":"s"} and selling only that available quantity across the verified bot listings.`);
   }
   const offerCount=listings.length;
   const job={
@@ -1546,6 +1652,9 @@ function enqueueTradeJob(result,options={}){
     windowId:sourceWindowId,
     forceManual,
     skipPurchase,
+    source:fromScrapTf?"scrap.tf":"stn",
+    scrapUrl:fromScrapTf?String(result.sourceItem?.href||""):"",
+    maxScrapValue:fromScrapTf?Number(result.sourceItem?.scrapValue)||null:null,
     status:"queued"
   };
   tradeAutomationQueue.push(job);
@@ -1860,7 +1969,7 @@ function notifyHit(result){
   notificationTargets.set(notificationId,result.sourceItem?.href||`https://stntrading.eu/item/tf2/${encodeURIComponent(result.name).replace(/%20/g,"+")}`);
   const options={
     type:"basic",
-    title:"🔥 TF2 ARBITRAGE HIT",
+    title:result.source==="scrap.tf"?"🔥 SCRAP.TF ARBITRAGE HIT":"🔥 TF2 ARBITRAGE HIT",
     message:`${result.name}\n${buy} → ${sell}\nPROFIT: +${profit} ref`,
     iconUrl:api.runtime.getURL("hit-icon.png")
   };
@@ -2197,10 +2306,64 @@ async function finish(result){
   results.push(result);
   checked=results.length;
   notifyHit(result);
+  updateSavedTrades(result).catch(error=>console.warn("Could not update the saved trades:",error));
   saveState({lastResult:result,finished:false}).finally(()=>{
     popup({type:"SCAN_RESULT",result,checked,total});
     next();
   });
+}
+
+// Saves a Good Trade to the local database, or records that a saved item is no
+// longer one. The read-modify-write is chained so two results never overwrite
+// each other.
+let savedTradesChain=Promise.resolve();
+function updateSavedTrades(result){
+  // The saved list is re-checked on STN, so scrap.tf finds are not kept in it.
+  if(!result?.name||result.source==="scrap.tf"||(!result.deal&&!result.savedCheck))return Promise.resolve();
+  savedTradesChain=savedTradesChain.then(async()=>{
+    const key=TF2SavedTrades.STORAGE_KEY;
+    const map=(await storageGet({[key]:{}}))[key]||{};
+    const before=JSON.stringify(map);
+    if(result.deal)TF2SavedTrades.recordGoodTrade(map,result);
+    else TF2SavedTrades.recordCheck(map,result);
+    if(JSON.stringify(map)!==before)await storageSet({[key]:map});
+  }).catch(()=>{});
+  return savedTradesChain;
+}
+
+// Opens the item's STN page (https://stntrading.eu/item/tf2/<name>) in the
+// scanner window and reads its current price and stock.
+async function refreshItemFromStn(item){
+  const url=marketplaceUrl(item.name);
+  let tab=null;
+  try{
+    tab=await createScanTab(url);
+    ownedTabIds.add(tab.id);
+    ownedTabUrls.set(tab.id,url);
+    currentTabId=tab.id;
+    const loaded=await waitForTabComplete(tab.id,30000);
+    if(!running)return {ok:false,reason:"Stopped."};
+    if(!loaded)return {ok:false,reason:"The STN item page did not finish loading."};
+    // STN runs its Turnstile check only in a visible page.
+    await ensureScanTabVisible(tab.id,6000);
+    let page=null;
+    const deadline=Date.now()+20000;
+    while(running&&Date.now()<deadline){
+      try{page=await msgTab(tab.id,{type:"READ_STN_ITEM_PAGE"})}catch(error){page=null}
+      if(page?.status==="ready")break;
+      await sleep(500);
+    }
+    if(!page||page.status!=="ready")return {ok:false,reason:page?.reason||"Could not read the price from the STN item page."};
+    if(page.stock<=0)return {ok:false,stock:0,reason:`STN has none in stock right now (${page.price}).`};
+    return {ok:true,price:page.price,stock:page.stock};
+  }catch(error){
+    return {ok:false,reason:`Could not open the STN item page: ${error?.message||error}`};
+  }finally{
+    if(tab&&Number.isInteger(tab.id)){
+      if(currentTabId===tab.id)currentTabId=null;
+      await closeTabRobust(tab.id);
+    }
+  }
 }
 
 async function highlightSourceItem(itemName){
@@ -2679,6 +2842,27 @@ async function next(){
   await saveState({finished:false});
   if(!running){scanItemBusy=false;return}
 
+  // A saved item is opened on STN first: the price and stock there are what the
+  // comparison with Backpack.tf must use, and an item STN no longer stocks
+  // cannot be bought anyway.
+  if(item.fromSaved){
+    const stn=await refreshItemFromStn(item);
+    if(!running){scanItemBusy=false;return}
+    if(!stn.ok){
+      await finish({
+        name:item.name,
+        skipped:true,
+        savedCheck:true,
+        reason:stn.reason,
+        sourceItem:{name:item.name,price:item.price||"",stock:stn.stock??null,href:marketplaceUrl(item.name)},
+        attempts:[]
+      });
+      return;
+    }
+    item.price=stn.price;
+    item.stock=stn.stock;
+  }
+
   const firstName=item.name;
   await highlightSourceItem(firstName);
   const originalSpec=getBackpackSpec(firstName);
@@ -2752,7 +2936,14 @@ async function next(){
   if(!running){scanItemBusy=false;return}
 
   const result=analyze(item,data);
-  result.sourceItem={name:item.name,price:item.price,stock:item.stock??null,href:marketplaceUrl(item.name)};
+  const fromScrap=item.source==="scrap.tf";
+  result.source=fromScrap?"scrap.tf":"stn";
+  result.sourceItem={
+    name:item.name,price:item.price,stock:item.stock??null,
+    href:fromScrap?(item.href||"https://scrap.tf/buy/hats"):marketplaceUrl(item.name),
+    ...(fromScrap?{source:"scrap.tf",scrapValue:Number(item.scrapValue)||null}:{})
+  };
+  if(item.fromSaved)result.savedCheck=true;
   result.attempts=attempts;
   // Preserve the exact Backpack.tf page that produced the usable Buy Orders
   // so a confirmed arbitrage hit can open both sides automatically.
@@ -2777,6 +2968,14 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
       const page=await msgTab(tab.id,{type:"READ_BUY_PAGE"}).catch(()=>null);
       if(!page?.items?.length){sendResponse({ok:false,error:"No TF2 marketplace items found on this page."});return}
+      let items=page.items;
+      if(items.some(i=>i.source==="scrap.tf")){
+        // The Craft Hats section is hundreds of 1.77 ref hats that Backpack.tf
+        // buyers never pay that much for; skipping it saves most of the scan.
+        const pref=await storageGet({scrapSkipCraft:true});
+        if(pref.scrapSkipCraft!==false)items=items.filter(i=>i.category!=="Craft Hats");
+        if(!items.length){sendResponse({ok:false,error:"Only Craft Hats were found on this scrap.tf page and they are skipped (see the checkbox in the popup)."});return}
+      }
       keyRate=+m.keyRate||63;
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
@@ -2785,12 +2984,36 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
-      queue=page.items;total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
+      queue=items;total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total});
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
       next();
     });
+    return true;
+  }
+  if(m.type==="START_SAVED_SCAN"){
+    (async()=>{
+      if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
+      const stored=await storageGet({[TF2SavedTrades.STORAGE_KEY]:{}});
+      const saved=TF2SavedTrades.list(stored[TF2SavedTrades.STORAGE_KEY]);
+      if(!saved.length){sendResponse({ok:false,error:"No saved items yet. Items are saved when they are found to be Good Trades."});return}
+      const tabs=await qTabs({active:true,currentWindow:true}).catch(()=>[]);
+      keyRate=+m.keyRate||63;
+      sourceTabId=tabs[0]?.id??null;
+      sourceWindowId=tabs[0]?.windowId??null;
+      if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
+      if(typeof m.autoTradesEnabled==="boolean"){
+        tradeAutomationEnabled=m.autoTradesEnabled;
+        storageSet({tradeAutomationEnabled});
+      }
+      queue=saved.map(entry=>({name:entry.name,price:entry.buyPrice||"",stock:null,href:marketplaceUrl(entry.name),fromSaved:true}));
+      total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
+      await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
+      sendResponse({ok:true,total});
+      emitTradeAutomationStatus(`Checking ${total} saved item${total===1?"":"s"} on STN and Backpack.tf.`);
+      next();
+    })().catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
     return true;
   }
   if(m.type==="STOP_SCAN"){
