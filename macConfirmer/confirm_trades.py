@@ -32,6 +32,11 @@ import time
 TRADE_OFFER = (1308, 578)
 CONFIRM_BUTTON = (1323, 928)
 
+# When the connection has timed out, the Steam app shows a retry button here.
+# It is clicked once at the start of every run, before anything else, and is
+# harmless when the button is not showing. Set to None to turn this off.
+TIMEOUT_RETRY_BUTTON = (1321, 849)
+
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
 # For example: open another tab in the Steam app, then come back to Confirmations.
 # Fill in with pointer positions from `cliclick p`:
@@ -108,8 +113,8 @@ class Clicker:
     def move(self, x, y):
         self._cliclick(f"m:{x},{y}")
 
-    def click(self, x, y):
-        if CLICK_REPEAT_MS > 0:
+    def click(self, x, y, repeat=True):
+        if repeat and CLICK_REPEAT_MS > 0:
             # One cliclick call, so the gap between the two clicks is exact.
             gap = max(20, CLICK_REPEAT_MS + random.randint(-30, 30))
             self._cliclick(f"c:{x},{y}", f"w:{gap}", f"c:{x},{y}")
@@ -148,7 +153,7 @@ def focus_mirroring():
     time.sleep(1.0)
 
 
-def click_checked(clicker, target, what, check_focus, spread):
+def click_checked(clicker, target, what, check_focus, spread, repeat=True):
     """Moves to the target, verifies it is safe, then clicks it."""
     x, y = jittered(target, spread)
     if check_focus and not clicker.dry_run and not mirroring_is_frontmost():
@@ -164,7 +169,7 @@ def click_checked(clicker, target, what, check_focus, spread):
     if position and (abs(position[0] - x) > 6 or abs(position[1] - y) > 6):
         raise RuntimeError(f"Pointer moved away from {what} ({position} instead of {(x, y)}); stopping.")
     print(f"  clicking {what} at {x},{y}")
-    clicker.click(x, y)
+    clicker.click(x, y, repeat)
 
 
 def refresh_list(clicker, mode, spread, invert_scroll, check_focus=True):
@@ -220,6 +225,12 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
     if countdown:
         print(f"Starting in {countdown}s. Do not touch the mouse; move it to stop.")
         time.sleep(countdown)
+
+    if TIMEOUT_RETRY_BUTTON:
+        # A timed-out connection leaves a retry button on screen; press it once
+        # (a single click, not the doubled one) before refreshing or accepting.
+        click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
+        pause(1.0, 2.0, "after the retry button")
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
     if refresh_mode != "none":
