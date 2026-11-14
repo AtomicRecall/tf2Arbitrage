@@ -40,7 +40,7 @@ TIMEOUT_RETRY_BUTTON = (1330, 877)
 =======
 TIMEOUT_RETRY_BUTTON = (1321, 849)
 # How long to wait after that click: the iPhone takes a while to initialize.
-RETRY_WAIT_SECONDS = (8.0, 10.0)
+RETRY_WAIT_SECONDS = (9.0, 11.0)
 >>>>>>> Stashed changes
 
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
