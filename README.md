@@ -124,11 +124,20 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
 | Dismissed | Items you hid (use *Dismiss* on a card; *Restore* brings it back) |
 | Traders | Traders you marked with *Mark traded* on Backpack.tf pages |
 | **Bought** | Hats bought, in total and per site (STN / scrap.tf), with the Steam offer numbers |
+| **Sell to STN** | Reverse scan hits: a hat Backpack.tf sells for less than STN pays for it |
 | **Checked** | Items checked in the last 60 minutes, at the price they were checked at, with a countdown. The next scan skips them. |
 
 A hit also shows a notification and plays `hit.mp3`. Card buttons: *Backpack.tf, highlight verified*
 opens the exact buy-order listings, *Retry this item* rechecks it, and *Auto trade (skip STN)*
 sends offers using hats you already own.
+
+### Reverse scan: buy on Backpack.tf, sell to STN
+
+**Scan STN buy prices** goes the other way. For each hat on the open STN hats page it reads what STN pays
+(the "Sell it for" box on the hat's own STN page, plus how many more STN will buy) and compares it with the
+cheapest bot sell listing on Backpack.tf. Hats where Backpack.tf is at least 0.05 ref cheaper land in the
+**Sell to STN** tab with a notification. This side is report-only: nothing is bought automatically.
+It is slow (two pages per hat), though hats STN will not buy more of are skipped quickly.
 
 ### Automatic trading
 

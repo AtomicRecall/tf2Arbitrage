@@ -7,6 +7,7 @@ const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeV
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
+const scanReverse=$("scanReverse"),tabReverse=$("tabReverse");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
@@ -175,14 +176,39 @@ function renderUnverifiedOffers(r){
 function removeExistingCard(key){
   results.querySelectorAll(`.result[data-key="${CSS.escape(key)}"]`).forEach(x=>x.remove());
 }
+// A reverse-scan result: what STN pays for the item against the cheapest sell
+// listings on Backpack.tf (buy there, sell to STN).
+function reverseCardHtml(r){
+  if(r.skipped)return `<div class="line reason">${esc(r.reason)}</div>`;
+  const profit=Number(r.profitRef)||0;
+  const note=r.reverseDeal?" (buy on Backpack.tf, sell to STN)":(r.humanOnly?" (only non-bot sellers listed)":" (not profitable)");
+  let html=`<div class="line">Buy on Backpack.tf: ${esc(r.bpPrice?.display||"?")}${r.bestListing?.listingName?` — ${esc(r.bestListing.listingName)}`:""}</div>`+
+    `<div class="line">STN pays: ${esc(r.stnPrice?.display||"?")} · STN will buy ${Number(r.stnCapacity)||0} more</div>`+
+    `<div class="line ${r.reverseDeal?"profit":"lossText"}">${profit>=0?"+":""}${profit.toFixed(2)} ref${note}</div>`+
+    `<div class="line listing-count">Sell listings seen: <strong>${Number(r.sellListingCount)||0}</strong> · from bots: ${Number(r.botSellListingCount)||0}</div>`;
+  if(r.cheaperHumanPrice)html+=`<div class="small">A non-bot seller lists it for ${esc(r.cheaperHumanPrice)} (would need negotiating by hand).</div>`;
+  const rows=(Array.isArray(r.sellListings)?r.sellListings:[]).map(entry=>{
+    const link=safeSteamTradeUrl(entry.tradeUrl);
+    return `<div class="small">${esc(entry.price)} — ${esc(entry.listingName||"unknown")} (${entry.botLike?"bot":"trader"})${link?` <a class="offer-check-link" href="${esc(link)}" target="_blank" rel="noopener">Open offer</a>`:""}</div>`;
+  }).join("");
+  if(rows)html+=`<div class="debug-title">Cheapest sell listings:</div>${rows}`;
+  const backpack=safeWebUrl(r.backpackUrl);
+  if(backpack)html+=`<div class="market-actions"><a class="market-link" href="${esc(backpack)}" target="_blank" rel="noopener">Open Backpack.tf listings</a></div>`;
+  return html;
+}
+function categoryOf(r){
+  if(r.alreadyChecked)return "checked";
+  if(r.reverse)return r.reverseDeal?"reverse":(r.skipped?"notfound":"found");
+  return r.skipped?"notfound":(r.deal?"deal":"found");
+}
 function renderResult(r,prepend=true){
   if(!r)return;
   const key=itemKey(r.name);
   const resultId=String(r.resultId||`${key}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`);
   const d=document.createElement("div");
   const dismissed=isDismissed(r.name);
-  const category=dismissed?"dismissed":(r.alreadyChecked?"checked":(r.skipped?"notfound":(r.deal?"deal":"found")));
-  d.className="result "+(dismissed?"dismissed":(r.alreadyChecked?"skip already-checked":(r.skipped?"skip":(r.deal?"deal":"loss"))));
+  const category=dismissed?"dismissed":categoryOf(r);
+  d.className="result "+(dismissed?"dismissed":(r.alreadyChecked?"skip already-checked":(r.skipped?"skip":((r.deal||r.reverseDeal)?"deal":"loss"))));
   d.dataset.category=category;
   d.dataset.key=key;
   d.dataset.resultId=resultId;
@@ -191,7 +217,9 @@ function renderResult(r,prepend=true){
   const offerChecks=Array.isArray(r.offerChecks)?r.offerChecks:[];
   const verifiedOfferCount=offerChecks.filter(entry=>entry.verification?.status==="sufficient").length;
   let html=`<div class="result-top"><div class="name">${esc(r.name)}${sourceBadge(r.source||r.sourceItem?.source)}${r.alreadyChecked?' <span class="checked-badge" title="Checked recently; scans skip this item for 60 minutes after a check unless its price changes">Already checked</span>':""}</div><button class="dismiss-item" title="Dismiss this item">${dismissed?"Restore":"Dismiss"}</button></div>`;
-  if(r.skipped){
+  if(r.reverse){
+    html+=reverseCardHtml(r);
+  }else if(r.skipped){
     html+=`<div class="line reason">${esc(r.reason)}</div>`;
   }else{
     const displaySell=r.deal?r.sellPrice:(r.pricePotentialSellPrice||r.sellPrice);
@@ -239,7 +267,7 @@ function renderResult(r,prepend=true){
       await saveDismissed();
       dismiss.textContent="Dismiss";
       d.classList.remove("dismissed");
-      d.dataset.category=r.alreadyChecked?"checked":(r.skipped?"notfound":(r.deal?"deal":"found"));
+      d.dataset.category=categoryOf(r);
     }else{
       dismissedItems.add(key);
       await saveDismissed();
@@ -297,6 +325,7 @@ function updateTabCounts(){
   const good=cards.filter(x=>x.dataset.category==="deal").length;
   const notfound=cards.filter(x=>x.dataset.category==="notfound").length;
   const dismissed=cards.filter(x=>x.dataset.category==="dismissed").length;
+  tabReverse.textContent=String(cards.filter(x=>x.dataset.category==="reverse").length);
   tabAll.textContent=cards.length-dismissed;
   tabFound.textContent=found;
   tabDeals.textContent=good;
@@ -385,7 +414,7 @@ function hydrate(state){
   results.innerHTML=""; unverifiedResults.innerHTML=""; checked.textContent=String(state?.checked||0); total.textContent=String(state?.total||0);
   let dealCount=0;
   const history=Array.isArray(state?.results)?state.results:[];
-  for(const r of history){renderResult(r,false);if(r.deal&&!isDismissed(r.name))dealCount++;}
+  for(const r of history){renderResult(r,false);if((r.deal||r.reverseDeal)&&!isDismissed(r.name))dealCount++;}
   deals.textContent=String(dealCount);
   updateTabCounts();
   applyFilter();
@@ -554,6 +583,7 @@ volume.oninput=()=>{
 
 scan.onclick=()=>startScan("START_SCAN");
 scanSaved.onclick=()=>startScan("START_SAVED_SCAN");
+scanReverse.onclick=()=>startScan("START_REVERSE_SCAN");
 async function startScan(type){
   api.storage.local.set({keyRate:+rate.value||63});
   const r=await send({type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
@@ -581,7 +611,7 @@ api.runtime.onMessage.addListener(async m=>{
   if(m.type==="SCAN_RESULT"){
     checked.textContent=m.checked;
     renderResult(m.result,true);
-    if(m.result.deal&&!isDismissed(m.result.name)) deals.textContent=+deals.textContent+1;
+    if((m.result.deal||m.result.reverseDeal)&&!isDismissed(m.result.name)) deals.textContent=+deals.textContent+1;
     status.textContent=`${m.checked} / ${m.total} checked`;
   }
   if(m.type==="SCAN_FINISHED"){

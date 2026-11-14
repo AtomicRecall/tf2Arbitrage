@@ -2379,6 +2379,7 @@ async function finish(result){
   notifyHit(result);
   updateSavedTrades(result).catch(error=>console.warn("Could not update the saved trades:",error));
   recordCheckedItem(result);
+  notifyReverseHit(result);
   saveState({lastResult:result,finished:false}).finally(()=>{
     popup({type:"SCAN_RESULT",result,checked,total});
     next();
@@ -2409,6 +2410,7 @@ function updateSavedTrades(result){
 // price could not be read) are not recorded, so those items are tried again.
 const CHECK_FAILURE_REASON=/did not return a usable|Could not parse|did not finish loading|Could not (?:read|open)|has none in stock|^Stopped\./i;
 function isConclusiveCheck(result){
+  if(result?.reverse)return false;
   if(!result?.name||!result.sourceItem?.price)return false;
   if(!result.skipped)return true;
   if(!result.attempts?.length)return false;
@@ -2473,6 +2475,158 @@ async function refreshItemFromScrap(item){
   if(!found)return {ok:false,stock:0,reason:"scrap.tf does not list this item right now."};
   if(!(Number(found.stock)>0))return {ok:false,stock:0,reason:`scrap.tf has none in stock right now (${found.price}).`};
   return {ok:true,price:found.price,stock:found.stock,scrapValue:found.scrapValue,href:found.href||SCRAP_BUY_URL};
+}
+
+// ---- reverse scan: buy on Backpack.tf, sell to STN --------------------------------
+// For each hat on the STN listing the scanner reads what STN pays for it (the
+// "Sell it for" box of its item page, plus how many more STN will buy) and the
+// cheapest sell listings on its Backpack.tf stats page. When the cheapest bot
+// listing costs at least MIN_PROFIT_REF less than STN pays, it is reported.
+// Nothing is bought automatically on this side.
+async function readStnBuyPrice(item){
+  const url=marketplaceUrl(item.name);
+  let tab=null;
+  try{
+    tab=await createScanTab(url);
+    ownedTabIds.add(tab.id);
+    ownedTabUrls.set(tab.id,url);
+    currentTabId=tab.id;
+    const loaded=await waitForTabComplete(tab.id,30000);
+    if(!running)return {ok:false,reason:"Stopped."};
+    if(!loaded)return {ok:false,reason:"The STN item page did not finish loading."};
+    await ensureScanTabVisible(tab.id,6000);
+    let page=null;
+    const deadline=Date.now()+20000;
+    while(running&&Date.now()<deadline){
+      try{page=await msgTab(tab.id,{type:"READ_STN_SELL_PAGE"})}catch(error){page=null}
+      if(page?.status==="ready")break;
+      await sleep(500);
+    }
+    if(!page||page.status!=="ready")return {ok:false,reason:"STN shows no buy price for this item (or its page did not load)."};
+    return {ok:true,price:page.price,capacity:page.capacity};
+  }catch(error){
+    return {ok:false,reason:`Could not open the STN item page: ${error?.message||error}`};
+  }finally{
+    if(tab&&Number.isInteger(tab.id)){
+      if(currentTabId===tab.id)currentTabId=null;
+      await closeTabRobust(tab.id);
+    }
+  }
+}
+
+async function readSellListingsWhenStable(tabId,itemName,desiredSpec=null){
+  const start=Date.now();
+  let lastCount=-1,lastSignature="",stableSince=0;
+  while(running&&Date.now()-start<PAGE_SETTLE_TIMEOUT){
+    try{
+      const state=await msgTab(tabId,{type:"CHECK_CLASSIFIEDS_READY",itemName});
+      if(state&&state.ready){
+        const signature=String(state.signature||"");
+        if(state.count===lastCount&&signature===lastSignature){
+          if(!stableSince)stableSince=Date.now();
+          if(Date.now()-stableSince>=1500)return await msgTab(tabId,{type:"READ_STATS_SELL_LISTINGS",itemName,desiredSpec});
+        }else{stableSince=0;lastCount=state.count;lastSignature=signature;}
+      }
+    }catch(error){}
+    await sleep(LISTING_POLL_MS);
+  }
+  return null;
+}
+
+async function processReverseItem(item){
+  const stnUrl=marketplaceUrl(item.name);
+  const base={
+    name:item.name,
+    reverse:true,
+    source:"stn",
+    sourceItem:{name:item.name,price:item.price||"",stock:item.stock??null,href:stnUrl,reverse:true},
+    attempts:[]
+  };
+  await highlightSourceItem(item.name,"stn");
+  const stn=await readStnBuyPrice(item);
+  if(!running){scanItemBusy=false;return}
+  if(!stn.ok){await finish({...base,skipped:true,reason:stn.reason});return}
+  const stnPrice=parsePrice(stn.price);
+  if(!stnPrice){await finish({...base,skipped:true,reason:`Could not parse STN's buy price (${stn.price}).`});return}
+  base.stnPrice=stnPrice;
+  base.stnCapacity=stn.capacity;
+  if(!(stn.capacity>0)){
+    await finish({...base,skipped:true,reason:`STN is not buying more of this item right now (it would pay ${stn.price}).`});
+    return;
+  }
+
+  const resolved=await bpUrlAsync(item.name);
+  const backpackUrl=resolved.url;
+  base.backpackUrl=backpackUrl;
+  base.attempts=[{name:item.name,url:backpackUrl,source:"stats",status:"opened"}];
+  let data=null;
+  try{
+    const tab=await createScanTab(backpackUrl);
+    ownedTabIds.add(tab.id);
+    ownedTabUrls.set(tab.id,backpackUrl);
+    currentTabId=tab.id;
+    if(await loadBackpackPage(tab.id,backpackUrl))data=await readSellListingsWhenStable(tab.id,item.name,resolved.spec);
+  }catch(error){
+    console.warn("Could not read the Backpack.tf sell listings:",error);
+  }finally{
+    await closeAllOwnedTabs();
+    if(!running){scanItemBusy=false;await closeAutomationWindowIfIdle()}
+  }
+  if(!data)await sleep(randomDelay(4000,6500));
+  if(!running){scanItemBusy=false;return}
+  if(!data){
+    base.attempts[0].status="failed";
+    await finish({...base,skipped:true,reason:"Backpack.tf did not return a usable sell listings page."});
+    return;
+  }
+
+  const priced=(data.listings||[])
+    .map(listing=>({listing,price:parsePrice(listing.price)}))
+    .filter(entry=>entry.price)
+    .sort((a,b)=>a.price.refValue-b.price.refValue);
+  base.attempts[0].status=priced.length?"found":"no-match";
+  if(!priced.length){
+    await finish({...base,skipped:true,reason:"Backpack.tf lists no matching sell listing for this item."});
+    return;
+  }
+  const bots=priced.filter(entry=>entry.listing.botLike);
+  const best=bots[0]||priced[0];
+  const profitRef=stnPrice.refValue-best.price.refValue;
+  const reverseDeal=Boolean(bots[0])&&profitRef+0.0000001>=MIN_PROFIT_REF;
+  const cheaperHuman=!best.listing.botLike?null:priced.find(entry=>!entry.listing.botLike&&entry.price.refValue<best.price.refValue&&stnPrice.refValue-entry.price.refValue+0.0000001>=MIN_PROFIT_REF);
+  await finish({
+    ...base,
+    bpPrice:best.price,
+    bestListing:best.listing,
+    tradeOfferUrl:String(best.listing.tradeUrl||""),
+    profitRef,
+    reverseDeal,
+    humanOnly:!bots.length,
+    cheaperHumanPrice:cheaperHuman?.price?.display||"",
+    sellListingCount:priced.length,
+    botSellListingCount:bots.length,
+    sellListings:priced.slice(0,5).map(entry=>({price:entry.price.display,listingName:entry.listing.listingName||"",botLike:Boolean(entry.listing.botLike),tradeUrl:String(entry.listing.tradeUrl||"")}))
+  });
+}
+
+function notifyReverseHit(result){
+  if(!result?.reverseDeal||!result.name)return;
+  const key=`reverse|${String(result.name).toLowerCase()}|${result.profitRef.toFixed(4)}|${result.bpPrice?.display||""}`;
+  if(notifiedDeals.has(key))return;
+  notifiedDeals.add(key);
+  const notificationId=`tf2-hit-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  notificationTargets.set(notificationId,result.backpackUrl||result.sourceItem?.href||"https://stntrading.eu/");
+  const options={
+    type:"basic",
+    title:"💰 STN BUY-PRICE HIT",
+    message:`${result.name}\nBackpack.tf ${result.bpPrice?.display||"?"} → STN pays ${result.stnPrice?.display||"?"}\nPROFIT: +${result.profitRef.toFixed(2)} ref`,
+    iconUrl:api.runtime.getURL("hit-icon.png")
+  };
+  try{
+    const created=api.notifications.create(notificationId,options);
+    if(created&&typeof created.catch==="function")created.catch(()=>{});
+  }catch(e){}
+  playHitSound();
 }
 
 // Opens the item's STN page (https://stntrading.eu/item/tf2/<name>) in the
@@ -3007,6 +3161,12 @@ async function next(){
   await saveState({finished:false});
   if(!running){scanItemBusy=false;return}
 
+  // Reverse scan: what STN pays versus Backpack.tf sell listings.
+  if(item.reverse){
+    await processReverseItem(item);
+    return;
+  }
+
   // A saved item is opened on STN first: the price and stock there are what the
   // comparison with Backpack.tf must use, and an item STN no longer stocks
   // cannot be bought anyway.
@@ -3226,6 +3386,42 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
       next();
     });
+    return true;
+  }
+  if(m.type==="START_REVERSE_SCAN"){
+    (async()=>{
+      if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
+      const tabs=await qTabs({active:true,currentWindow:true}).catch(()=>[]);
+      const tab=tabs[0];
+      if(!tab){sendResponse({ok:false,error:"No active tab."});return}
+      keyRate=+m.keyRate||63;
+      const stnPage=/^https:\/\/(?:www\.)?stntrading\.eu\//i;
+      const windowTabs=await qTabs({windowId:tab.windowId}).catch(()=>[tab]);
+      const pageTabs=[tab,...windowTabs.filter(other=>other.id!==tab.id)].filter(other=>stnPage.test(String(other.url||"")));
+      const found=new Map();
+      const tabsBySource={};
+      for(const pageTab of pageTabs){
+        const page=await msgTab(pageTab.id,{type:"READ_BUY_PAGE"}).catch(()=>null);
+        for(const entry of page?.items||[]){
+          if(entry.source==="scrap.tf")continue;
+          const key=TF2CheckedItems.keyFor(entry.name);
+          if(!key||found.has(key))continue;
+          found.set(key,{name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||"",source:"stn",reverse:true});
+          if(!Number.isInteger(tabsBySource.stn))tabsBySource.stn=pageTab.id;
+        }
+      }
+      if(!found.size){sendResponse({ok:false,error:"No STN items found. Open the stntrading.eu hats listing first."});return}
+      sourceTabsBySource=tabsBySource;
+      sourceTabId=tab.id;
+      sourceWindowId=tab.windowId;
+      if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
+      queue=[...found.values()];
+      total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
+      await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
+      sendResponse({ok:true,total,sources:{stn:total}});
+      emitTradeAutomationStatus("Checking what STN pays for each hat against Backpack.tf sell listings. Nothing is bought automatically on this side.");
+      next();
+    })().catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
     return true;
   }
   if(m.type==="START_SAVED_SCAN"){

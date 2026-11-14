@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.116
+Current version 0.7.118
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,14 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.118 changes:
+- scrap.tf buying now finds the hat with the page's own "Search for items" box (input.inventory-search): the name is typed in, the list filters, and the visible copies are the ones selected. The box is cleared if the hat is no longer listed.
+
+V0.7.117 changes:
+- New reverse scan, "Scan STN buy prices (buy on Backpack.tf, sell to STN)". It reads the stntrading.eu hats page open in the window, then for every hat opens its STN item page and reads the "Sell it for" box (what STN pays, and "We can buy N more"). Hats STN will not buy more of are skipped without touching Backpack.tf. For the rest it opens the Backpack.tf stats page, reads the sell listings (cheapest first, flagged bot / trader) and reports the hat when the cheapest bot listing costs at least 0.05 ref less than STN pays. A cheaper non-bot seller is mentioned but never counted as the deal.
+- Hits show in a new "Sell to STN" tab (and the hit counter), with a notification and the hit sound; the cards list the cheapest sell listings with their offer links. Nothing is bought automatically on this side, and these results are not written to the 60-minute checked table.
+- Backpack.tf reader: the listing reader can now read sell listings too (intent "sell"); Buy Order reading is unchanged.
 
 V0.7.116 changes:
 - Hats the bot bought are part of the saved list ("Check saved items"): every purchase saves the item (again, if it had been removed) with a green "Bought xN" badge, the site it was bought on and its price, and Check saved items re-checks it on that site (STN page or scrap.tf Buy Hats page) and Backpack.tf. Purchases made before this version are added once, the first time the add-on starts.

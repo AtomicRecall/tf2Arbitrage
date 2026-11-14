@@ -100,6 +100,54 @@
       }));
   }
   function scrapSelectedCount(){return scrapSelection().reduce((sum,entry)=>sum+entry.count,0)}
+
+  // The page's own search box ("Search for items", input.inventory-search) filters
+  // the item list the way a person would look for one hat. The page has one for
+  // the user's backpack (#sell-container) and one for the shop; the shop's is used.
+  function scrapSearchInput(){
+    const inputs=[...document.querySelectorAll("input.inventory-search")];
+    return inputs.find(input=>!input.closest("#sell-container"))||null;
+  }
+  // The text typed is the item's name without the quality word that readScrapTfPage
+  // adds (scrap.tf titles do not carry "Genuine", "Vintage", ...).
+  function scrapSearchText(name){
+    return String(name||"").replace(/^(?:Genuine|Vintage|Haunted|Collector's)\s+/i,"").trim();
+  }
+  function scrapSetSearch(input,text){
+    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
+    if(setter)setter.call(input,text);else input.value=text;
+    input.dispatchEvent(new Event("input",{bubbles:true}));
+    input.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true,key:text.slice(-1)||"Backspace"}));
+    input.dispatchEvent(new Event("change",{bubbles:true}));
+  }
+  // Types the item's name into the search box and waits until the list shows it.
+  async function scrapSearch(name){
+    const input=scrapSearchInput();
+    if(!input)return {used:false};
+    const text=scrapSearchText(name);
+    if(!text)return {used:false};
+    const target=normalizeName(name);
+    const matching=()=>[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")]
+      .filter(node=>normalizeName(scrapItemName(node))===target);
+    if(input.value!==text){
+      try{input.focus()}catch(error){}
+      scrapSetSearch(input,text);
+    }
+    const deadline=Date.now()+4000;
+    let found=false;
+    while(Date.now()<deadline){
+      await scrapSleep(250);
+      if(matching().some(scrapShown)){found=true;break}
+    }
+    // Let the filter finish hiding the other items before anything is clicked.
+    if(found)await scrapSleep(400);
+    return {used:true,found};
+  }
+  function scrapClearSearch(){
+    const input=scrapSearchInput();
+    if(input&&input.value)scrapSetSearch(input,"");
+  }
+
   async function scrapBuy(name,quantity,maxScrapValue){
     const wanted=Math.max(1,Math.floor(Number(quantity))||1);
     const target=normalizeName(name);
@@ -107,10 +155,20 @@
     if(!allTiles.length){
       return {ok:false,status:"not-ready",reason:"The scrap.tf item list is not on the page (still loading, or you are not signed in to scrap.tf)."};
     }
-    let tiles=allTiles
+    // Filter the shop to this hat with the page's search box first.
+    const search=await scrapSearch(name);
+    let tiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")]
       .filter(node=>normalizeName(scrapItemName(node))===target)
       .sort((a,b)=>Number(a.getAttribute("data-item-value"))-Number(b.getAttribute("data-item-value")));
-    if(!tiles.length)return {ok:false,reason:`${name} is no longer listed on scrap.tf.`};
+    if(search.used){
+      // After the search, the copies it left showing are the ones to click.
+      const showing=tiles.filter(scrapShown);
+      if(showing.length)tiles=showing;
+    }
+    if(!tiles.length){
+      scrapClearSearch();
+      return {ok:false,reason:`${name} is no longer listed on scrap.tf.`};
+    }
     const limit=Number(maxScrapValue);
     if(Number.isFinite(limit)&&limit>0){
       const cheap=tiles.filter(node=>Number(node.getAttribute("data-item-value"))<=limit);
@@ -683,7 +741,10 @@
     return "";
   }
 
-  function getMatchingListings(itemName,desiredSpec=null,priceSink=null){
+  function getMatchingListings(itemName,desiredSpec=null,priceSink=null,intent="buy"){
+    // "buy" reads Buy Orders (bot buyers). "sell" reads the sell listings of the
+    // same item, which the reverse scan compares with STN's buy price.
+    const isSell=intent==="sell";
     const target=normalizeName(itemName);
     const desiredQuality=desiredSpec?.quality||null;
     const desiredCraftability=desiredSpec?.craftability||null;
@@ -694,7 +755,7 @@
       if(!item)continue;
       const name=item.dataset.name||item.dataset.base_name||"";
       if(normalizeName(name)!==target)continue;
-      if(getListingIntent(listing,item)!=="buy")continue;
+      if(getListingIntent(listing,item)!==intent)continue;
 
       // Classifieds can contain multiple quality variants for the same base
       // item. Match the actual listing quality to the requested variant so a
@@ -750,7 +811,8 @@
       );
       const userButtonTitle=String(userButton?.getAttribute("title")||"").trim();
       const userButtonHref=String(userButton?.getAttribute("href")||"").trim();
-      if(userButtonTitle.includes("Add this user") || /friend/i.test(userButtonHref))continue;
+      const humanSeller=userButtonTitle.includes("Add this user") || /friend/i.test(userButtonHref);
+      if(!isSell&&humanSeller)continue;
 
       // ONLY treat a listing as bot-managed when Backpack.tf's actual green
       // buyout button explicitly says "Please only offer the buyout.".
@@ -762,8 +824,8 @@
       const buttonTitle=String(buyoutButton?.getAttribute("title")||"").trim();
       const isBotBuyout=buttonTitle.includes("Please only offer the buyout.");
       const negotiationAllowed=buttonTitle.includes("Negotiation is allowed.");
-      const botLike=isBotBuyout&&!negotiationAllowed;
-      if(!botLike)continue;
+      const botLike=isSell?(!humanSeller&&!negotiationAllowed):(isBotBuyout&&!negotiationAllowed);
+      if(!isSell&&!botLike)continue;
 
       // Parts, spells, paint and the like make this a special-version order.
       if(specialListingReason(listing,item))continue;
@@ -796,7 +858,7 @@
       if(paintOnlyDescription&&!matchedTerms.includes("painted item request")){
         matchedTerms.push("painted item request");
       }
-      if(item.dataset.paint_name||item.dataset.paint_hex||matchedTerms.length)continue;
+      if(item.dataset.paint_name||item.dataset.paint_hex||(!isSell&&matchedTerms.length))continue;
       if(!item.dataset.listing_price)continue;
 
       const tradeUrl=getListingTradeOfferUrl(listing,item);
@@ -806,7 +868,7 @@
 
       found.push({
         price:item.dataset.listing_price,
-        intent:"buy",
+        intent,
         listingName,
         comment:item.dataset.listing_comment||"",
         description,
@@ -897,6 +959,30 @@
     };
   }
 
+  // The "Sell it for" box of an STN item page: what STN pays for the item, and
+  // how many more it is willing to buy ("We can buy <b data-stock-limit>N</b> more").
+  function readStnSellPage(){
+    if(!/^(?:www\.)?stntrading\.eu$/i.test(location.hostname)||!location.pathname.startsWith("/item/")){
+      return {status:"failed",reason:"This is not an STN item page."};
+    }
+    const label=[...document.querySelectorAll("p")].find(p=>/^\s*sell it for\s*:?\s*$/i.test(p.textContent));
+    const box=label?.parentElement;
+    const price=box?.querySelector("b")?.textContent.trim().replace(/\s+/g," ")||"";
+    if(!price||!/(?:keys?|ref)/i.test(price))return {status:"loading",reason:"STN's buy price is not visible yet."};
+    const limitNode=box.querySelector("b[data-stock-limit]");
+    let capacity=Number((limitNode?.textContent||"").trim());
+    if(!Number.isFinite(capacity)){
+      capacity=Number((box.textContent.match(/we can buy\s*(\d+)\s*more/i)||[])[1]);
+    }
+    return {status:"ready",price,capacity:Number.isFinite(capacity)?capacity:0};
+  }
+
+  function readStatsSellListings(itemName,desiredSpec=null){
+    const listings=deduplicateListings(getMatchingListings(itemName,desiredSpec,null,"sell"));
+    listings.sort((a,b)=>approx(a.price)-approx(b.price));
+    return {listings};
+  }
+
   function readStatsBuyOrders(itemName,desiredSpec=null){
     const listings=deduplicateListings(getMatchingListings(itemName,desiredSpec));
     listings.sort((a,b)=>approx(b.price)-approx(a.price));
@@ -951,7 +1037,9 @@
         identity=`listing:${stableName}|${String(listing.price||"").trim().toLowerCase()}|${normalizeName(listing.comment||listing.description||"")}`;
       }
       const existing=unique.get(identity);
-      if(!existing||approx(listing.price)>approx(existing.price))unique.set(identity,listing);
+      // Buy Orders keep a trader's highest price, sell listings their lowest.
+      const better=listing.intent==="sell"?approx(listing.price)<approx(existing?.price):approx(listing.price)>approx(existing?.price);
+      if(!existing||better)unique.set(identity,listing);
     }
     return [...unique.values()];
   }
@@ -1743,6 +1831,14 @@
     }
     if(msg.type==="READ_STN_ITEM_PAGE"){
       sendResponse(readStnItemPage());
+      return;
+    }
+    if(msg.type==="READ_STN_SELL_PAGE"){
+      sendResponse(readStnSellPage());
+      return;
+    }
+    if(msg.type==="READ_STATS_SELL_LISTINGS"){
+      sendResponse(readStatsSellListings(msg.itemName,msg.desiredSpec||null));
       return;
     }
     if(msg.type==="HIGHLIGHT_MARKET_ITEM")sendResponse(highlightMarketItem(msg.itemName));
