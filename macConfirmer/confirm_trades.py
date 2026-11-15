@@ -56,8 +56,8 @@ REFRESH_TAPS = []
 REFRESH_Y_OFFSET = 0
 
 # Mouse-wheel refresh: this many wheel events of this many lines each.
-WHEEL_EVENTS = 50
-WHEEL_LINES = 7
+WHEEL_EVENTS = 60
+WHEEL_LINES = 10
 
 # iPhone Mirroring lags, so a single click is sometimes not registered. Every
 # click is sent twice, this many milliseconds apart (0 = a single click).
