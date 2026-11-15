@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.132
+Current version 0.7.133
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,9 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.133 changes:
+- After the scanner window opens (it comes up on top of iPhone Mirroring), the add-on asks the Mac confirmer to bring iPhone Mirroring back to the front (new endpoint POST /focus, about 1.2 s after the window exists). It does nothing when the Mac confirmer is not set up, and a failure never affects the scan.
 
 V0.7.132 changes:
 - Key prices are no longer checked or paid as their full metal value. The trader metal check (TF2 Metal Trader 0.9.127) first counts the Mann Co. Supply Crate Keys the trader holds and only asks for metal for the keys they lack, plus the ref part of the price. The check's offered amount counts those keys at the key rate, so quantities are worked out as before. The offer-check text says when keys were counted.

@@ -15,6 +15,8 @@ Endpoints (all but /ping need the header `X-Confirm-Token: <token>`):
   POST /resume    -> clears a pause caused by a failure
   POST /cancel    -> drops everything still waiting in the queue
   POST /shutdown  -> stops this server (sent by the add-on when the browser is closed)
+  POST /focus     -> brings iPhone Mirroring to the front (sent by the add-on after it opens the
+                     scanner window, which comes up on top of it)
 
 Safety rules:
   * only private-network clients are served (and only --allow addresses if given)
@@ -257,23 +259,25 @@ class Confirmer:
         return state
 
     def _ask_for_phone(self, count):
-        """Makes sure the phone is not in use before the Mac takes it over."""
+        """Makes sure the phone is not in use before the Mac takes it over.
+        Returns True when the phone was seen on the confirmations page (the connection
+        retry clicks are then not needed)."""
         state = self._phone_state()
         if state == "free":
             log("The phone is already on the confirmations page: no notification needed.")
-            return
+            return True
         sent = self.notifier.send(
             "Lock your iPhone",
             f"{count} trade{'s' if count != 1 else ''} to confirm. Put your phone down and lock it now: "
             f"the Mac takes it over in {int(self.notify_lead)} seconds.",
         )
         if not sent:
-            return
+            return False
         self.phone_taken = True
         if state != "busy":
             log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
             time.sleep(self.notify_lead)
-            return
+            return False
         # The spot does not show the confirmations page: go on as soon as it does.
         log(f"Sent the phone notification; waiting up to {self.phone_wait:.0f}s for the confirmations page to show.")
         deadline = time.time() + self.phone_wait
@@ -281,8 +285,9 @@ class Confirmer:
             time.sleep(2.0)
             if self._phone_state() == "free":
                 time.sleep(1.5)
-                return
+                return True
         log("The confirmations page did not show up in time; trying anyway.")
+        return False
 
     def _give_phone_back(self, text):
         """Tells you the phone is free again, once nothing more is waiting for it."""
@@ -298,12 +303,13 @@ class Confirmer:
             count, ids = self._next_batch()
             try:
                 # The phone has to be locked and unused while the Mac clicks on it.
-                if not self.dry_run and self.notifier.enabled:
-                    self._ask_for_phone(count)
+                on_page = False
+                if not self.dry_run and (self.notifier.enabled or self.phone):
+                    on_page = self._ask_for_phone(count)
                 delay = random.uniform(self.min_delay, self.max_delay)
                 log(f"Accepting {count} trade{'s' if count != 1 else ''} in {delay:.1f}s…")
                 time.sleep(delay)
-                confirm_trades.run(count, self.dry_run, True, 0, 5, "wheel", False)
+                confirm_trades.run(count, self.dry_run, True, 0, 5, "wheel", False, skip_retry=on_page)
                 with self.cond:
                     self.active_ids.difference_update(ids)
                     self.done_ids.update(ids)
@@ -385,6 +391,12 @@ def make_handler(confirmer, token, allowed):
                     return self._send(*confirmer.resume())
                 if method == "POST" and path == "/cancel":
                     return self._send(*confirmer.cancel())
+                if method == "POST" and path == "/focus":
+                    # Only brings the app forward; it never clicks anything.
+                    if not confirmer.dry_run:
+                        threading.Thread(target=confirm_trades.focus_mirroring, daemon=True).start()
+                    log("Focusing iPhone Mirroring (the scanner window opened).")
+                    return self._send(200, {"ok": True})
                 if method == "POST" and path == "/shutdown":
                     # The add-on sends this when the browser window was closed;
                     # browserShell/launch.py then quits Firefox and exits too.

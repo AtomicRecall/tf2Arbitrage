@@ -139,6 +139,9 @@ function ensureAutomationWindow(){
     if(!openedUnfocused&&Number.isInteger(sourceWindowId)&&sourceWindowId!==created.id){
       try{await updateWindow(sourceWindowId,{focused:true})}catch(error){}
     }
+    // The new window may have covered iPhone Mirroring on the Mac; bring that
+    // app back to the front (it does not wait for the answer).
+    refocusIPhoneMirroring();
     return automationWindowId;
   })().finally(()=>{automationWindowPromise=null});
   return automationWindowPromise;
@@ -1155,6 +1158,20 @@ async function loadMacConfirmerSettings(){
   const url=String(saved.url||"").trim().replace(/\/+$/,"");
   const token=String(saved.token||"").trim();
   return {enabled:Boolean(saved.enabled)&&/^https?:\/\//i.test(url)&&Boolean(token),url,token};
+}
+
+// Asks the Mac confirmer server to bring iPhone Mirroring back to the front
+// (POST /focus). Used right after the scanner window opens, which comes up on
+// top of it. Does nothing when the Mac confirmer is not set up, and a failure
+// is never an error for the scan.
+async function refocusIPhoneMirroring(){
+  try{
+    const settings=await loadMacConfirmerSettings();
+    if(!settings.enabled)return;
+    // Firefox finishes bringing its new window forward a moment after it exists.
+    await sleep(1200);
+    await macConfirmerFetch(settings,"/focus",{});
+  }catch(error){console.warn("Could not ask the Mac to focus iPhone Mirroring:",error)}
 }
 
 async function macConfirmerFetch(settings,path,body){

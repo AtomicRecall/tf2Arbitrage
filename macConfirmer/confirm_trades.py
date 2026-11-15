@@ -222,7 +222,9 @@ def refresh_list(clicker, mode, spread, invert_scroll, check_focus=True):
             pull_down_to_refresh(start[0], start[1], invert=invert_scroll)
 
 
-def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scroll):
+def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scroll, skip_retry=False):
+    """`skip_retry`: the phone is known to be on the confirmations page already, so the
+    connection retry buttons are not clicked."""
     clicker = Clicker(dry_run)
 
     if not dry_run:
@@ -231,7 +233,9 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
         print(f"Starting in {countdown}s. Do not touch the mouse; move it to stop.")
         time.sleep(countdown)
 
-    if TIMEOUT_RETRY_BUTTON:
+    if skip_retry:
+        print("The phone is already on the confirmations page: skipping the connection retry clicks.")
+    elif TIMEOUT_RETRY_BUTTON:
         # A timed-out connection leaves a retry button on screen; press it once
         # (a single click, not the doubled one) before refreshing or accepting.
         click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)

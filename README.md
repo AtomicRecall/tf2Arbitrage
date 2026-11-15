@@ -178,6 +178,10 @@ asks the confirm server on the same computer to shut down (`POST /shutdown`), wh
 quit Firefox and exit. Closing the Terminal or killing the launcher quits Firefox and the server too.
 Closing only the scanner window by hand stops a running scan.
 
+When the scanner window opens it comes up on top of iPhone Mirroring, so the add-on then asks the confirm server
+(`POST /focus`) to bring iPhone Mirroring back to the front. This only happens when the Mac confirmer is set up
+in the popup, and nothing is clicked.
+
 ### Already checked items (60-minute memory)
 
 Every item the bot checks is remembered for **60 minutes**, together with the price it was checked at
@@ -230,7 +234,8 @@ it once. Before a run the server takes a tiny screenshot of the spot: if it has 
 already on the confirmations page, so no "Lock your iPhone" message is sent and the clicks start. If it has another
 colour, the message is sent and the Mac starts as soon as the colour shows up (at most `--phone-wait`, 120 s). When
 the confirmations are done and nothing else is waiting, a second message, "You can use your phone", is sent (only if
-the first one was).
+the first one was). When the spot shows the confirmations page, the run also skips the connection retry clicks
+(`TIMEOUT_RETRY_BUTTON` and `SECOND_RETRY_BUTTON`) and their 9-11 s wait, since the page is already there.
 
 ```bash
 python3 macConfirmer/confirm_server.py --pick-phone-spot        # put the mouse on the spot within 5 s; the phone must show the confirmations page
