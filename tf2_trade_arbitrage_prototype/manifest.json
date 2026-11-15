@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 2,
   "name": "TF2 Trade Arbitrage Prototype",
-  "version": "0.7.123",
+  "version": "0.7.124",
   "description": "Finds profitable TF2 buy orders, verifies Steam offer states via the Web API, tracks traders, and can execute queued arbitrage trades.",
   "permissions": [
     "tabs",
@@ -42,7 +42,7 @@
     }
   ],
   "browser_action": {
-    "default_title": "TF2 Trade Analyzer v0.7.123",
+    "default_title": "TF2 Trade Analyzer v0.7.124",
     "default_popup": "popup.html"
   },
   "sidebar_action": {

@@ -31,7 +31,9 @@ import argparse
 import json
 import os
 import platform
+import re
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -236,6 +238,33 @@ def start_server(server_dry_run, log=None):
     return process
 
 
+def profile_pattern(profile):
+    """A regular expression that matches the command line of the Firefox that
+    runs on `profile` (and no other Firefox, nor this launcher's own --profile)."""
+    escaped = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", str(profile))
+    return r"(^|[[:space:]])-profile[[:space:]]+" + escaped
+
+
+def stop_firefox(process, opened_by_system, profile):
+    """Quits the Firefox this launcher started, if it is still running. It asks
+    politely first (SIGTERM lets Firefox save its session) and only then forces."""
+    if process is None:
+        return
+    if opened_by_system and shutil.which("pkill"):
+        pattern = profile_pattern(profile)
+        subprocess.run(["pkill", "-TERM", "-f", pattern], capture_output=True)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0:
+            time.sleep(0.5)
+        subprocess.run(["pkill", "-KILL", "-f", pattern], capture_output=True)
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
 def open_iphone_mirroring():
     """Opens iPhone Mirroring so it is ready for the confirmation clicks."""
     if platform.system() != "Darwin":
@@ -291,14 +320,34 @@ def main():
     if not args.no_server and not args.no_mirroring:
         open_iphone_mirroring()
     caffeinate = start_caffeinate()
+
+    # Closing the Terminal (SIGHUP) or killing the launcher (SIGTERM) must end
+    # Firefox and the server too. Firefox opened through macOS is not a child of
+    # this terminal, so it has to be stopped explicitly.
+    def leave(signum, frame):
+        raise SystemExit(128 + signum)
+
+    for name in ("SIGHUP", "SIGTERM"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), leave)
+
+    firefox_process = None
     try:
-        print("Starting Firefox. Close its window to stop everything.")
+        print("Starting Firefox. Closing its last window stops everything.")
         print(f"Firefox's console output goes to {args.log_dir / 'firefox.log'}")
         if opened_by_system:
-            subprocess.run(command)
+            firefox_process = subprocess.Popen(command)
         else:
-            subprocess.run(command, stdout=firefox_log, stderr=subprocess.STDOUT)
+            firefox_process = subprocess.Popen(command, stdout=firefox_log, stderr=subprocess.STDOUT)
+        while firefox_process.poll() is None:
+            # The add-on asks the server to shut down when the browser window
+            # was closed. Closing a window does not quit Firefox on a Mac.
+            if server is not None and server.poll() == 0:
+                print("The confirm server shut down because the browser window was closed. Quitting Firefox.")
+                break
+            time.sleep(1)
     finally:
+        stop_firefox(firefox_process, opened_by_system, args.profile)
         for process in (server, caffeinate):
             if process and process.poll() is None:
                 process.terminate()

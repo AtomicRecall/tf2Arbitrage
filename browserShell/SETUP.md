@@ -33,7 +33,7 @@ Mac confirmation server alongside it.
   The first time, macOS asks whether the app may control Terminal: allow it.
 
 Both start the real server (clicks on). For the dry run in step 4, use `python3 browserShell/launch.py --server-dry-run`.
-Close Firefox to stop everything.
+Close Firefox to stop everything. Closing its last window is enough: the add-on stops the scan and tells the server to shut down, and the launcher then quits Firefox and exits. Closing the Terminal (or killing the launcher) also quits Firefox and the server.
 
 **Logs.** Firefox's console chatter (such as the `sandbox_extension_issue_file_to_process failed ... Operation not permitted` lines, which are harmless) is always written to `~/Library/Logs/TF2Trader/firefox.log` instead of the window. `python3 browserShell/launch.py --quiet` also writes the launcher and confirm server output to `launcher.log` and `server.log` there, so the window stays empty (`--log-dir` changes the folder).
 

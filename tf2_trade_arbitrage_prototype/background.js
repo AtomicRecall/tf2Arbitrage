@@ -205,7 +205,11 @@ async function closeAutomationWindow(){
   automationWindowId=null;
   await restoreMainWindowFocus();
   if(!Number.isInteger(id)||!await getWindowIfOpen(id))return;
-  try{await removeWindow(id)}catch(error){console.warn("Could not close the scanner window:",error)}
+  selfClosedWindowIds.add(id);
+  try{await removeWindow(id)}catch(error){
+    selfClosedWindowIds.delete(id);
+    console.warn("Could not close the scanner window:",error);
+  }
 }
 
 function isTradeWorkBusy(){
@@ -1797,6 +1801,7 @@ async function runTradeQueue(){
     if(tradeAutomationQueue.length&&(tradeAutomationEnabled||tradeAutomationQueue[0]?.forceManual))runTradeQueue();
     else{
       if(!tradeAutomationMessage)emitTradeAutomationStatus("No trades are running.");
+      if(shutdownLauncherPending)shutDownLocalHelper().catch(()=>{});
       // Nothing left to trade: close the scanner window unless a scan still uses it.
       closeAutomationWindowIfIdle().catch(error=>console.warn("Could not close the idle scanner window:",error));
     }
@@ -2376,12 +2381,79 @@ function removeWindow(id){
   if(isFirefoxBrowserApi)return api.windows.remove(id);
   return new Promise((resolve,reject)=>api.windows.remove(id,()=>{const e=api.runtime.lastError;if(e){reject(new Error(e.message));return}resolve()}));
 }
+// ---- Closing the browser -----------------------------------------------------
+// Closing the user's Firefox window ends everything the add-on is doing: scans
+// stop (the results so far stay saved), queued trades are dropped, the scanner
+// window closes and the local confirm server is told to shut down, which makes
+// browserShell/launch.py quit Firefox. Without this the scanner window kept
+// Firefox alive (a Mac does not quit when its last window closes) and the scan went
+// on without a main window. Windows the add-on closes itself are not mistaken for
+// the user closing them.
+const selfClosedWindowIds=new Set();
+let shutdownLauncherPending=false;
+
+async function stopScanningBecauseClosed(reason){
+  const wasActive=running||scanItemBusy||queue.length>0;
+  running=false;
+  queue=[];
+  sourceTabId=null;
+  if(wasActive)emitTradeAutomationStatus(`${reason} Scanning was stopped; the results so far are saved.`);
+  try{await closeCurrentTab()}catch(error){}
+  try{await closeAllOwnedTabs()}catch(error){}
+  scanItemBusy=false;
+  try{await saveState({running:false,queueLength:0})}catch(error){console.warn("Could not save the scan state:",error)}
+  popup({type:"SCAN_FINISHED",checked,total});
+}
+
+// Asks the confirm server on this computer (started by the launcher) to stop.
+// A trade that is still running finishes first.
+async function shutDownLocalHelper(){
+  if(isTradeWorkBusy()){
+    shutdownLauncherPending=true;
+    emitTradeAutomationStatus("The browser window was closed. The running trade finishes first; then the confirm server and the launcher shut down.");
+    return;
+  }
+  shutdownLauncherPending=false;
+  try{
+    const settings=await loadMacConfirmerSettings();
+    if(!settings.enabled||!/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(settings.url))return;
+    await macConfirmerFetch(settings,"/shutdown",{});
+  }catch(error){console.warn("Could not ask the local confirm server to shut down:",error)}
+}
+
+async function handleWindowClosed(id,wasScanner){
+  if(wasScanner){
+    // The user closed the scanner window by hand: stop scanning instead of
+    // opening a new one. A running trade is left alone.
+    if(running||scanItemBusy)await stopScanningBecauseClosed("The scanner window was closed.");
+    return;
+  }
+  let others=[{}];
+  try{others=(await api.windows.getAll({windowTypes:["normal"]})).filter(win=>win.id!==automationWindowId)}catch(error){}
+  const browserClosed=others.length===0;
+  const wasSource=id===sourceWindowId;
+  if(!wasSource&&!browserClosed)return;
+  if(wasSource)sourceWindowId=null;
+  await stopScanningBecauseClosed(browserClosed?"The Firefox window was closed.":"The window the scan was started from was closed.");
+  if(!browserClosed)return;
+  const removed=tradeAutomationQueue.filter(job=>!job.resendOf).length;
+  if(removed){
+    tradeAutomationQueue=tradeAutomationQueue.filter(job=>job.resendOf);
+    emitTradeAutomationStatus(`Dropped ${removed} queued item trade${removed===1?"":"s"} because the browser was closed.`);
+  }
+  await closeAutomationWindowIfIdle();
+  await shutDownLocalHelper();
+}
+
 if(api.windows?.onRemoved){
   api.windows.onRemoved.addListener(id=>{
-    if(id===automationWindowId){
+    if(selfClosedWindowIds.delete(id))return;
+    const wasScanner=id===automationWindowId;
+    if(wasScanner){
       automationWindowId=null;
       automationWindowRaised=false;
     }
+    handleWindowClosed(id,wasScanner).catch(error=>console.warn("Could not handle the closed window:",error));
   });
 }
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}

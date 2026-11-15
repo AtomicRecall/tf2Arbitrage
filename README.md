@@ -169,6 +169,15 @@ shows the current step. Sounds follow the same pattern for both sites: `middle1.
 purchase is accepted and more is coming, `middle2.wav` when it was the last and again after the last
 offer is sent, `Item_metal_pot_drop.wav` when a scan ends.
 
+### Closing the browser
+
+Closing the Firefox window ends everything: the scan stops (results, the 60-minute memory and saved
+trades are already stored locally), queued trades are dropped and the scanner window closes (a trade that
+is already running finishes first). On a Mac a closed window does not quit Firefox, so the add-on also
+asks the confirm server on the same computer to shut down (`POST /shutdown`), which makes the launcher
+quit Firefox and exit. Closing the Terminal or killing the launcher quits Firefox and the server too.
+Closing only the scanner window by hand stops a running scan.
+
 ### Already checked items (60-minute memory)
 
 Every item the bot checks is remembered for **60 minutes**, together with the price it was checked at

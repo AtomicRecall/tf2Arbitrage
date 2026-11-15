@@ -14,6 +14,7 @@ Endpoints (all but /ping need the header `X-Confirm-Token: <token>`):
                      that were already marked done but are still unconfirmed
   POST /resume    -> clears a pause caused by a failure
   POST /cancel    -> drops everything still waiting in the queue
+  POST /shutdown  -> stops this server (sent by the add-on when the browser is closed)
 
 Safety rules:
   * only private-network clients are served (and only --allow addresses if given)
@@ -256,6 +257,13 @@ def make_handler(confirmer, token, allowed):
                     return self._send(*confirmer.resume())
                 if method == "POST" and path == "/cancel":
                     return self._send(*confirmer.cancel())
+                if method == "POST" and path == "/shutdown":
+                    # The add-on sends this when the browser window was closed;
+                    # browserShell/launch.py then quits Firefox and exits too.
+                    log("Shutdown requested by the add-on (the browser was closed).")
+                    self._send(200, {"ok": True})
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
             except (ValueError, TypeError, json.JSONDecodeError) as error:
                 return self._send(400, {"ok": False, "error": f"bad request: {error}"})
             return self._send(404, {"ok": False, "error": "not found"})
@@ -306,6 +314,8 @@ def main():
     except KeyboardInterrupt:
         log("Stopped.")
         sys.exit(0)
+    server.server_close()
+    log("Stopped on request.")
 
 
 if __name__ == "__main__":

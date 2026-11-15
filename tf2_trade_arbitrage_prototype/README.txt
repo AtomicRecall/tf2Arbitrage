@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.123
+Current version 0.7.124
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.124 changes:
+- Closing the browser now stops everything. Closing the Firefox window the scan was started from (or the last normal window) stops the scan (results, checked items and saved trades stay saved), drops queued trades, closes the scanner window (after a running trade finishes) and, when the confirm server runs on the same computer, asks it to shut down so the launcher quits Firefox too. Closing the scanner window by hand also stops a running scan instead of opening a new one.
+- browserShell/launch.py: Firefox opened through macOS is no longer tied to the Terminal; closing the Terminal or killing the launcher now quits that Firefox (and the server) explicitly. The confirm server has a new POST /shutdown endpoint.
 
 V0.7.123 changes:
 - scrap.tf search box: the hat's name typed into the page's "Search for items" box was only removed when the hat was not found. It is now cleared however a purchase attempt ends (bought, price rose, nothing selectable, checkout unavailable, error), and the add-on waits until the item list is unfiltered again, retrying the clear once.
