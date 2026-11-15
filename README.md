@@ -194,8 +194,8 @@ checked again as soon as its 60 minutes are up or its price on that site changes
 ### Check saved items
 
 Every Good Trade, from STN or scrap.tf, and every hat the bot bought is saved in the browser (bought ones carry a **Bought ×N** badge). **Check saved items** reopens each one
-on the site it was found on (its STN page, or the scrap.tf Buy Hats page) and on Backpack.tf and runs
-the normal check again. A saved item that is checked again and is no longer a Good Trade (its price rose, or nobody buys it) is removed from the list automatically; checks that failed to load keep the item.
+on the site it was found on and on Backpack.tf and runs
+the normal check again. Saved scrap.tf items are all answered from one read of the scrap.tf Buy Hats page (one tab, no waiting per item); saved STN items open their own STN page. A saved item that is checked again and is no longer a Good Trade (its price rose, or nobody buys it) is removed from the list automatically; checks that failed to load keep the item.
 While it runs the status box names the item being checked and why one could not be read (a page that did not load is tried twice, and after three in a row the check pauses for 45 seconds), and when it ends it summarises how many saved items are still good, were removed, or could not be checked.
 
 ### Mac confirmer

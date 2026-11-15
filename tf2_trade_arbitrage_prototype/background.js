@@ -2788,8 +2788,8 @@ function recordCheckedItem(result){
   return checkedItemsChain;
 }
 
-// The scrap.tf Buy Hats page read for a "Check saved items" scan. It is large,
-// so one read serves every saved scrap.tf item of the same scan.
+// The scrap.tf Buy Hats list read for a "Check saved items" scan: one read
+// serves every saved scrap.tf item of the same scan.
 let scrapPageCache=null;
 // Reasons a saved item's marketplace page could not be read (as opposed to the
 // item really not being listed or being out of stock).
@@ -2840,70 +2840,61 @@ async function readScrapPageWhenComplete(tabId,timeoutMs=30000){
   return latest;
 }
 
-// "Check saved items" keeps ONE scrap.tf Buy Hats tab open for the whole check.
-// Every saved scrap.tf item is looked up in it with the page's own search box: the
-// name is typed in (replacing the previous item's), the page filters its list, and
-// what stays visible is the answer. The tab is not one of the per-item tabs that
-// are closed between items; it is closed when the check ends or is stopped.
-let scrapSessionTabId=null;
-async function closeScrapSessionTab(){
-  const id=scrapSessionTabId;
-  scrapSessionTabId=null;
-  if(Number.isInteger(id))await closeTabRobust(id);
+// "Check saved items" reads the scrap.tf Buy Hats page ONCE (one tab, opened and
+// closed again). Every saved scrap.tf item is then answered from that one list: it
+// is listed with stock, listed but out of stock, or not listed at all. No tab is
+// opened per item, and an item the list already rules out is not waited on.
+const SCRAP_LIST_REUSE_MS=10*60000;
+function scrapListFresh(){
+  return Boolean(scrapPageCache&&Array.isArray(scrapPageCache.items)&&Date.now()-scrapPageCache.at<SCRAP_LIST_REUSE_MS);
 }
 
-async function ensureScrapSessionTab(){
-  if(Number.isInteger(scrapSessionTabId)&&await tabStillExists(scrapSessionTabId))return scrapSessionTabId;
-  scrapSessionTabId=null;
-  const tab=await createScanTab(SCRAP_BUY_URL);
-  scrapSessionTabId=tab.id;
-  if(!await waitForTabComplete(tab.id,30000)){
-    await closeScrapSessionTab();
-    throw new Error("The scrap.tf Buy Hats page did not finish loading.");
+async function loadScrapList(){
+  let tab=null;
+  try{
+    tab=await createScanTab(SCRAP_BUY_URL);
+    ownedTabIds.add(tab.id);
+    ownedTabUrls.set(tab.id,SCRAP_BUY_URL);
+    currentTabId=tab.id;
+    const loaded=await waitForTabComplete(tab.id,30000);
+    if(!running)return {ok:false,reason:"Stopped."};
+    if(!loaded)return {ok:false,reason:"The scrap.tf Buy Hats page did not finish loading."};
+    await ensureScanTabVisible(tab.id,6000);
+    const items=await readScrapPageWhenComplete(tab.id);
+    if(!running)return {ok:false,reason:"Stopped."};
+    if(!items)return {ok:false,reason:"Could not read the scrap.tf Buy Hats page (are you signed in to scrap.tf?)."};
+    scrapPageCache={at:Date.now(),items};
+    emitTradeAutomationStatus(`Read the scrap.tf Buy Hats page once: ${items.length} hat${items.length===1?"":"s"} listed. Every saved scrap.tf item is answered from this single read.`);
+    return {ok:true};
+  }catch(error){
+    return {ok:false,reason:`Could not open the scrap.tf Buy Hats page: ${error?.message||error}`};
+  }finally{
+    if(tab&&Number.isInteger(tab.id)){
+      if(currentTabId===tab.id)currentTabId=null;
+      await closeTabRobust(tab.id);
+    }
   }
-  await ensureScanTabVisible(tab.id,6000);
-  const items=await readScrapPageWhenComplete(tab.id);
-  if(!items){
-    await closeScrapSessionTab();
-    throw new Error("Could not read the scrap.tf Buy Hats page (are you signed in to scrap.tf?).");
-  }
-  emitTradeAutomationStatus(`Opened scrap.tf (${items.length} hat${items.length===1?"":"s"} listed). This tab stays open for the whole check; each saved item is looked up by typing its name into the page's search box.`);
-  return tab.id;
+}
+
+function scrapAnswerFor(item,items){
+  const target=TF2CheckedItems.keyFor(item.name);
+  const found=items.find(entry=>entry.source==="scrap.tf"&&TF2CheckedItems.keyFor(entry.name)===target);
+  if(!found)return {ok:false,stock:0,reason:"scrap.tf does not list this item right now."};
+  if(!(Number(found.stock)>0))return {ok:false,stock:0,reason:`scrap.tf has none in stock right now (${found.price}).`};
+  return {ok:true,price:found.price,stock:found.stock,scrapValue:found.scrapValue,href:found.href||SCRAP_BUY_URL};
+}
+
+// The answer from the list that is already read, or null when it is not read yet.
+function savedScrapAnswer(item){
+  return scrapListFresh()?scrapAnswerFor(item,scrapPageCache.items):null;
 }
 
 async function refreshItemFromScrap(item){
-  let lastReason="";
-  for(let attempt=0;attempt<2&&running;attempt++){
-    let tabId;
-    try{tabId=await ensureScrapSessionTab()}
-    catch(error){return {ok:false,reason:String(error?.message||error)}}
-    if(!running)return {ok:false,reason:"Stopped."};
-    // Backpack.tf tabs open in front of it; bring it forward for the lookup.
-    try{await api.tabs.update(tabId,{active:true})}catch(error){}
-    let reply=null;
-    const deadline=Date.now()+25000;
-    while(running&&Date.now()<deadline){
-      try{reply=await msgTab(tabId,{type:"SCRAP_LOOKUP",name:item.name})}
-      catch(error){reply=null;lastReason="the scrap.tf tab stopped answering";break}
-      if(reply?.status!=="not-ready")break;
-      await sleep(1000);
-    }
-    if(!running)return {ok:false,reason:"Stopped."};
-    if(reply?.status==="ok"){
-      const how=reply.searchUsed?`searched "${reply.searchText}" in scrap.tf's search box`:"scrap.tf's search box was not found, so the whole list was read";
-      if(reply.searchUsed){
-        emitTradeAutomationStatus(`scrap.tf: typed "${reply.searchText}" into the search box (it now shows "${reply.boxText}"; the page's filter ${reply.filterApplied?"reacted":"did NOT react to it"}).`);
-      }
-      const found=reply.entry;
-      if(!found)return {ok:false,stock:0,reason:`scrap.tf does not list this item right now (${how}${reply.searchUsed&&!reply.filterApplied?", but the page's filter did not react":""}; ${reply.totalTiles} hats on the page).`};
-      if(!(Number(found.stock)>0))return {ok:false,stock:0,reason:`scrap.tf has none in stock right now (${found.price}).`};
-      return {ok:true,price:found.price,stock:found.stock,scrapValue:found.scrapValue,href:found.href||SCRAP_BUY_URL};
-    }
-    lastReason=reply?.reason||lastReason||"the scrap.tf page did not answer";
-    // The tab broke: open a new scrap.tf tab and look once more.
-    await closeScrapSessionTab();
+  if(!scrapListFresh()){
+    const loaded=await loadScrapList();
+    if(!loaded.ok)return loaded;
   }
-  return {ok:false,reason:`Could not read the scrap.tf Buy Hats page: ${lastReason}.`};
+  return scrapAnswerFor(item,scrapPageCache.items);
 }
 
 // ---- reverse scan: buy on Backpack.tf, sell to STN --------------------------------
@@ -3415,11 +3406,7 @@ async function closeTabRobust(id){
   if(!await tabStillExists(id)){ownedTabIds.delete(id);ownedTabUrls.delete(id)}
 }
 async function closeCurrentTab(){const id=currentTabId;currentTabId=null;if(id!==null)await closeTabRobust(id)}
-// Closes the tabs the scan opened for one item. The scrap.tf lookup tab of
-// "Check saved items" stays open between items (keepScrapSession) and is closed
-// when the scan ends or stops.
-async function closeAllOwnedTabs(keepScrapSession=false){
-  if(!keepScrapSession)await closeScrapSessionTab();
+async function closeAllOwnedTabs(){
   const ids=[...ownedTabIds];
   if(currentTabId!==null&&!ids.includes(currentTabId))ids.push(currentTabId);
   currentTabId=null;
@@ -3617,6 +3604,7 @@ async function nextInner(){
     running=false;
     scanItemBusy=false;
     if(naturalFinish)reportSavedCheckSummary();
+    scrapPageCache=null;
     await saveState({running:false,queueLength:0,finished:true});
     popup({type:"SCAN_FINISHED",checked,total});
     await closeAllOwnedTabs();
@@ -3627,8 +3615,13 @@ async function nextInner(){
     return;
   }
 
-  await closeAllOwnedTabs(true);
-  await sleep(randomDelay(BETWEEN_ITEMS_MIN,BETWEEN_ITEMS_MAX));
+  await closeAllOwnedTabs();
+  // A saved scrap.tf item that the single read of the scrap.tf list has already
+  // ruled out (not listed / out of stock) needs no page, so there is nothing to
+  // space out.
+  const upcoming=queue[0];
+  const answeredAlready=Boolean(upcoming&&upcoming.fromSaved&&upcoming.source==="scrap.tf"&&savedScrapAnswer(upcoming)?.ok===false);
+  if(!answeredAlready)await sleep(randomDelay(BETWEEN_ITEMS_MIN,BETWEEN_ITEMS_MAX));
   if(!running||!queue.length)return nextInner();
 
   // The scanner window is shared with the trade worker (STN purchase and Steam
@@ -3657,7 +3650,7 @@ async function nextInner(){
   if(item.fromSaved){
     const savedFromScrap=item.source==="scrap.tf";
     const siteLabel=savedFromScrap?"scrap.tf":"STN";
-    emitTradeAutomationStatus(`Checking saved item ${results.length+1}/${total}: ${item.name} (reading ${siteLabel}, then Backpack.tf)…`);
+    emitTradeAutomationStatus(`Checking saved item ${results.length+1}/${total}: ${item.name} (${savedFromScrap?"from the scrap.tf list":"reading STN"}, then Backpack.tf)…`);
     let stn=savedFromScrap?await refreshItemFromScrap(item):await refreshItemFromStn(item);
     // A page that did not load or answer is tried once more before the item is
     // given up on (the item is never removed from the saved list for this).
@@ -3769,9 +3762,8 @@ async function nextInner(){
       if(attempt===0&&namesToTry.length>1)await sleep(randomDelay(2500,4500));
     }
   }finally{
-    await closeAllOwnedTabs(true);
+    await closeAllOwnedTabs();
     // A stopped scan returns before reaching the end-of-scan cleanup above.
-    if(!running)await closeScrapSessionTab();
     if(!running){
       scanItemBusy=false;
       await closeAutomationWindowIfIdle();

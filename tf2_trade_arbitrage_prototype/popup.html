@@ -65,10 +65,10 @@
     <input id="scrapSkipCraft" type="checkbox" checked>
     <span>scrap.tf: skip the Craft Hats section (hundreds of 1.77 ref hats that are almost never profitable)</span>
   </label>
-  <button id="scanSaved" class="secondary" type="button" title="Opens each saved item on stntrading.eu and Backpack.tf and checks it again">Check saved items (0)</button>
+  <button id="scanSaved" class="secondary" type="button" title="Reads the scrap.tf Buy Hats page once for all saved scrap.tf items, opens each saved STN item on stntrading.eu, and checks Backpack.tf for every item that is still listed">Check saved items (0)</button>
   <details id="savedTradesBox" class="api-settings">
     <summary>Saved Good Trades (<span id="savedCount">0</span>)</summary>
-    <p class="api-key-info">Every item found to be a Good Trade is saved here, in this browser only. “Check saved items” opens each one on stntrading.eu (current price and stock) and Backpack.tf (Buy Orders) and runs the normal check. Items stay saved until you remove them.</p>
+    <p class="api-key-info">Every item found to be a Good Trade is saved here, in this browser only. “Check saved items” reads the scrap.tf Buy Hats page once and answers every saved scrap.tf item from that single read (listed, out of stock, or not listed; no tab per item). Saved STN items open their own stntrading.eu page for the current price and stock. Items that are still for sale are then checked on Backpack.tf (Buy Orders) as usual. Items stay saved until you remove them.</p>
     <div id="savedList"></div>
     <button id="clearSaved" class="secondary" type="button">Remove all saved items</button>
   </details>

@@ -46,12 +46,10 @@
     if(name&&prefix&&!name.toLowerCase().startsWith(prefix.toLowerCase()+" "))name=prefix+" "+name;
     return name;
   }
-  // `visibleOnly` leaves out the tiles the page's search box has filtered away.
-  function readScrapTfPage(visibleOnly=false){
+  function readScrapTfPage(){
     const nodes=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
     const cheapest=new Map();
     for(const node of nodes){
-      if(visibleOnly&&!scrapShown(node))continue;
       // Unusuals need their effect to be found on Backpack.tf and scrap.tf does
       // not name it, so they cannot be compared.
       if(scrapItemQuality(node)===5)continue;
@@ -197,30 +195,6 @@
     }
     console.warn("TF2 Arbitrage: the scrap.tf search box or item list was not restored after the purchase attempt.");
     return false;
-  }
-
-  // One lookup of "Check saved items": the hat's name replaces whatever is in the
-  // page's search box, the page filters its list, and what is left showing is the
-  // answer. The tab stays open, so the next item only swaps the text.
-  async function scrapLookup(name){
-    const tiles=document.querySelectorAll("#buy-container .banking-category .item[data-item-value]");
-    if(!tiles.length)return {status:"not-ready"};
-    const target=normalizeName(name);
-    const matches=entry=>normalizeName(entry.name)===target;
-    let search=await scrapSearch(name);
-    let entry=(search.used?readScrapTfPage(true):readScrapTfPage()).find(matches)||null;
-    if(!entry&&search.used){
-      // Empty the box and type the name again before calling it missing.
-      scrapClearSearch();
-      await scrapSleep(600);
-      search=await scrapSearch(name);
-      entry=readScrapTfPage(true).find(matches)||null;
-    }
-    return {
-      status:"ok",found:Boolean(entry),entry,
-      searchUsed:search.used,filterApplied:search.used?Boolean(search.applied):null,
-      searchText:scrapSearchText(name),boxText:search.boxText??"",totalTiles:tiles.length
-    };
   }
 
   // The search text never stays behind: it is cleared however the attempt ends
@@ -1917,13 +1891,6 @@
       scrapBuy(msg.name,msg.quantity,msg.maxScrapValue)
         .then(sendResponse)
         .catch(error=>sendResponse({ok:false,reason:error.message||String(error)}));
-      return true;
-    }
-    if(msg.type==="SCRAP_LOOKUP"){
-      if(!isScrapTf()){sendResponse({status:"error",reason:"This is not a scrap.tf page."});return}
-      scrapLookup(msg.name)
-        .then(sendResponse)
-        .catch(error=>sendResponse({status:"error",reason:error.message||String(error)}));
       return true;
     }
     if(msg.type==="SCRAP_QUEUE_STATE"){

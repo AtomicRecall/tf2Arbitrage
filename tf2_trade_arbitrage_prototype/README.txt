@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.128
+Current version 0.7.129
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,9 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.129 changes:
+- Check saved items, scrap.tf: all saved scrap.tf items are now answered from ONE read of the scrap.tf Buy Hats page. One tab is opened, the list is read until its length stops changing, the tab is closed, and each saved scrap.tf item is looked up in that list (in stock / out of stock / not listed). There is no tab, search typing or waiting per item any more, and an item the list already rules out is not delayed by the pause between items. Items that are still for sale go on to the Backpack.tf check as before. The list is read again only if it is more than 10 minutes old. The status box reports how many hats the one read held. The per-item search-box lookup of v0.7.127/128 was removed; the search box typing is still used when the bot buys on scrap.tf. The popup's texts describe this.
 
 V0.7.128 changes:
 - scrap.tf search box: typing a name now fires the whole key sequence (keydown, input, keyup with the key code, change) instead of only input/keyup without a key code. If the page's list does not react (no tile gets hidden), the name is typed in a second way, through the browser's own text insertion. The status box reports, for every scrap.tf lookup, what the box now shows and whether the page's filter reacted; a lookup that finds nothing says when the filter did not react.
