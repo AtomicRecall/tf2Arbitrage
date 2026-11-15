@@ -2422,6 +2422,15 @@ function updateSavedTrades(result){
     const map=(await storageGet({[key]:{}}))[key]||{};
     const before=JSON.stringify(map);
     if(result.deal)TF2SavedTrades.recordGoodTrade(map,result);
+    else if(result.savedCheck&&!result.unverifiedDeal&&isConclusiveCheck(result)){
+      // The saved item was checked again and is not a Good Trade any more (its
+      // price rose, or nobody buys it): it leaves the saved list by itself.
+      // Checks that failed or could not finish keep the item.
+      if(map[TF2SavedTrades.keyFor(result.name)]){
+        TF2SavedTrades.remove(map,result.name);
+        emitTradeAutomationStatus(`${result.name} is no longer a Good Trade, so it was removed from the saved items.`);
+      }
+    }
     else TF2SavedTrades.recordCheck(map,result);
     if(JSON.stringify(map)!==before)await storageSet({[key]:map});
   }).catch(()=>{});
@@ -2692,7 +2701,7 @@ function notifyReverseHit(result){
     const created=api.notifications.create(notificationId,options);
     if(created&&typeof created.catch==="function")created.catch(()=>{});
   }catch(e){}
-  playHitSound();
+  // No hit.mp3 here: that sound means a Good Trade, and this report-only hit is not one.
 }
 
 // Opens the item's STN page (https://stntrading.eu/item/tf2/<name>) in the

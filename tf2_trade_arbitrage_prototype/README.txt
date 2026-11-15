@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.120
+Current version 0.7.121
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,12 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.121 changes:
+- Gray-out fix: an item that was checked while it was the highlighted "currently checking" item could leave its gray veil spreading over the whole page once the highlight moved on, graying every item except the one being checked. The veil is now always anchored to its own item.
+- The hit sound (hit.mp3, "you got a Good Trade") no longer plays for a report-only "Sell to STN" hit. Those still show a notification and the Sell to STN tab.
+- Check saved items: a saved item that is checked again and is no longer a Good Trade (its price rose, or Backpack.tf has no buyer) is removed from the saved list automatically. Checks that failed to load keep the item.
+- The Remove button in the saved list no longer stretches across the row.
 
 V0.7.120 changes:
 - scrap.tf purchases are paced: the next scrap.tf trade is only requested after the previous scrap.tf offer was accepted (Steam Web API state 3), and then only after a 6-9 second pause. This applies to the batches of one item and between two different items.

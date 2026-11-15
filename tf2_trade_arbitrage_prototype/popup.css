@@ -43,7 +43,7 @@
 .saved-row{border:1px solid #333;border-radius:6px;padding:6px 8px;margin:6px 0}
 .saved-name{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:600}
 .saved-name a{color:inherit;text-decoration:underline;word-break:break-word}
-.saved-remove{padding:2px 8px;font-size:11px;flex:none}
+.saved-remove{width:auto;flex:none;margin:0;padding:2px 8px;font-size:11px}
 
 .source-badge{display:inline-block;margin-left:5px;padding:1px 5px;border:1px solid #111;font-size:8px;font-weight:bold;letter-spacing:.3px;text-transform:uppercase;vertical-align:middle;color:#fff}
 .source-badge.stn{background:linear-gradient(#3b6ea8,#244567)}

@@ -1653,7 +1653,15 @@
       node.classList.add("tf2-arb-checked");
       node.dataset.tf2ArbExpires=String(entry.expiresAt);
       node.dataset.tf2ArbLabel=entry.label;
-      if(getComputedStyle(node).position==="static"){
+      // The veil is positioned against the item, so the item must be positioned.
+      // The "currently checking" highlight positions its item too, but only while
+      // it is highlighted: measure without it, or the veil would later spread over
+      // the whole page once the highlight moves on to the next item.
+      const highlighted=node.classList.contains("tf2-arb-current-item");
+      if(highlighted)node.classList.remove("tf2-arb-current-item");
+      const isStatic=getComputedStyle(node).position==="static";
+      if(highlighted)node.classList.add("tf2-arb-current-item");
+      if(isStatic&&!node.dataset.tf2ArbSetPosition){
         node.style.position="relative";
         node.dataset.tf2ArbSetPosition="1";
       }
