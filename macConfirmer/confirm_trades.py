@@ -246,7 +246,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
     for number in range(1, count + 1):
         print(f"Trade {number}/{count}")
         click_checked(clicker, TRADE_OFFER, "the trade offer", check_focus, spread)
-        pause(3.6, 5.0, "for the offer to open")
+        pause(5.0, 8.0, "for the offer to open")
         click_checked(clicker, CONFIRM_BUTTON, "the confirm button", check_focus, spread)
         if number < count:
             # Steam goes back to the list and refreshes it by itself.

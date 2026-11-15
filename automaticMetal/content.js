@@ -12,7 +12,7 @@
 
   const METAL_VALUES = Object.freeze({ refined: 9, reclaimed: 3, scrap: 1 });
   const KEY_NAME = "Mann Co. Supply Crate Key";
-  const KEY_IMAGE_URL = "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEAaR4uURrwvz0N252yVaDVWrRTno9m4ccG2GNqxlQoZrC2aG9hcVGUWflbX_drrVu5UGki5sAij6tOtQ/96fx96f";
+  const KEY_IMAGE_URL = "https://community.fastly.steamstatic.com/economy/image/fWFc82js0fmoRAP-qOIPu5THSWqfSmTELLqcUywGkijVjZULUrsm1j-9xgEAaR4uURrwvz0N252yVaDVWrRTno9m4ccG2GNqxlQoZrC2aG9hcVGUWflbX_drrVu5UGki5sAij6tOtQ/96fx96fdpx2x";
   const TOUR_TICKET_NAME = "Tour of Duty Ticket";
   const EXTENSION_VERSION = browser.runtime.getManifest().version;
   const INVENTORY_SELECTION_RESPONSE_TIMEOUT_MS = 50000;
