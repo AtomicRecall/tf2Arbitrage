@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.124
+Current version 0.7.125
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.125 changes:
+- Check saved items (and every other scan) no longer ends silently when something unexpected goes wrong while one item is checked: that item gets a "Check failed: ..." result with the error, and the scan carries on with the next item (five failures in a row stop it, with a message). Failed checks are never remembered as checked.
+- Check saved items now says what it is doing: "Checking saved item 7/23: ...", the reason when an item's STN or scrap.tf page could not be read, and a summary at the end (still Good Trades / no longer good and removed / unverified / could not be checked and kept, with the reasons). A page that did not load is tried once more; after three in a row the check pauses 45 seconds so the site is not hammered.
 
 V0.7.124 changes:
 - Closing the browser now stops everything. Closing the Firefox window the scan was started from (or the last normal window) stops the scan (results, checked items and saved trades stay saved), drops queued trades, closes the scanner window (after a running trade finishes) and, when the confirm server runs on the same computer, asks it to shut down so the launcher quits Firefox too. Closing the scanner window by hand also stops a running scan instead of opening a new one.

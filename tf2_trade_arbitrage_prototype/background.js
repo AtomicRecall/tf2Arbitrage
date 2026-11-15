@@ -2659,6 +2659,8 @@ async function finish(result){
   // The result list is the source of truth for progress. This prevents the
   // counter from getting ahead of the actual results during long scans.
   result.resultId=`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  scanCurrentItem=null;
+  if(!String(result.reason||"").startsWith("Check failed:"))scanStepErrors=0;
   if(result.profitableListings?.length)await verifyProfitableListings(result);
   // The item's tabs are closed and its verification is done, so a queued trade
   // may now use the scanner window.
@@ -2707,7 +2709,7 @@ function updateSavedTrades(result){
 // was checked at, site, time). A normal scan skips an item for 60 minutes while
 // its price on that site stays the same. Failures (Backpack.tf did not load, a
 // price could not be read) are not recorded, so those items are tried again.
-const CHECK_FAILURE_REASON=/did not return a usable|Could not parse|did not finish loading|Could not (?:read|open)|has none in stock|^Stopped\./i;
+const CHECK_FAILURE_REASON=/did not return a usable|Could not parse|did not finish loading|Could not (?:read|open)|has none in stock|^Stopped\.|^Check failed:|shows no buy price/i;
 function isConclusiveCheck(result){
   if(!result?.name||!result.sourceItem?.price)return false;
   if(!result.skipped)return true;
@@ -2779,6 +2781,31 @@ function recordCheckedItem(result){
 // The scrap.tf Buy Hats page read for a "Check saved items" scan. It is large,
 // so one read serves every saved scrap.tf item of the same scan.
 let scrapPageCache=null;
+// Reasons a saved item's marketplace page could not be read (as opposed to the
+// item really not being listed or being out of stock).
+const SAVED_REFRESH_RETRY_REASON=/did not finish loading|Could not (?:read|open)|shows no buy price|Could not read the price/i;
+const SAVED_BACKOFF_MS=45000;
+let savedRefreshFailures=0;
+
+// At the end of a "Check saved items" run: what happened to the saved items.
+function reportSavedCheckSummary(){
+  const list=Array.isArray(results)?results:[];
+  if(!list.length||!list.every(result=>result?.savedCheck))return;
+  let good=0,gone=0,unverified=0;
+  const unchecked=new Map();
+  for(const result of list){
+    if(result.deal)good++;
+    else if(result.unverifiedDeal)unverified++;
+    else if(result.skipped&&!isConclusiveCheck(result)){
+      const reason=String(result.reason||"unknown reason").replace(/\s+/g," ").slice(0,90);
+      unchecked.set(reason,(unchecked.get(reason)||0)+1);
+    }else gone++;
+  }
+  const failed=[...unchecked.values()].reduce((sum,count)=>sum+count,0);
+  const details=[...unchecked.entries()].map(([reason,count])=>`${count}× ${reason}`).join("; ");
+  emitTradeAutomationStatus(`Saved items checked: ${good} still Good Trade${good===1?"":"s"}, ${gone} no longer good (removed from the list), ${unverified} unverified (kept), ${failed} could not be checked and stay saved${details?` (${details})`:""}.`);
+}
+
 async function refreshItemFromScrap(item){
   const target=TF2CheckedItems.keyFor(item.name);
   let items=scrapPageCache&&Date.now()-scrapPageCache.at<5*60000?scrapPageCache.items:null;
@@ -3469,11 +3496,61 @@ function marketplaceUrl(itemName){
   return `https://stntrading.eu/item/tf2/${encodeURIComponent(clean).replace(/%20/g,"+")}`;
 }
 
+// The item being checked right now, so a failure can be reported against it.
+let scanCurrentItem=null;
+let scanStepErrors=0;
+const SCAN_MAX_STEP_ERRORS=5;
+
+// One step of the scan. An unexpected error used to end the chain silently (the
+// scan stayed "running" and nothing more happened); now the item gets a failed
+// result, the reason is shown, and the scan goes on with the next item.
 async function next(){
+  try{
+    await nextInner();
+  }catch(error){
+    console.error("Scan step failed:",error);
+    const item=scanCurrentItem;
+    scanCurrentItem=null;
+    scanItemBusy=false;
+    if(!running)return;
+    scanStepErrors++;
+    const message=String(error?.message||error).slice(0,200);
+    emitTradeAutomationStatus(`Checking ${item?.name||"the next item"} failed unexpectedly (${message}). ${scanStepErrors>=SCAN_MAX_STEP_ERRORS?"Too many errors in a row, so the scan was stopped.":"Moving on to the next item."}`);
+    if(scanStepErrors>=SCAN_MAX_STEP_ERRORS){
+      running=false;
+      queue=[];
+      await closeAllOwnedTabs().catch(()=>{});
+      await saveState({running:false,queueLength:0}).catch(()=>{});
+      popup({type:"SCAN_FINISHED",checked,total});
+      await closeAutomationWindowIfIdle().catch(()=>{});
+      return;
+    }
+    if(item){
+      try{
+        await finish({
+          name:item.name,
+          skipped:true,
+          savedCheck:Boolean(item.fromSaved),
+          reverse:Boolean(item.reverse),
+          source:item.source==="scrap.tf"?"scrap.tf":"stn",
+          reason:`Check failed: ${message}`,
+          sourceItem:{name:item.name,price:item.price||"",stock:item.stock??null,href:item.href||"",...(item.reverse?{reverse:true}:{})},
+          attempts:[]
+        });
+        return;
+      }catch(innerError){console.error("Could not record the failed check:",innerError)}
+    }
+    await sleep(2000);
+    next();
+  }
+}
+
+async function nextInner(){
   if(!running||!queue.length){
     const naturalFinish=running&&!queue.length;
     running=false;
     scanItemBusy=false;
+    if(naturalFinish)reportSavedCheckSummary();
     await saveState({running:false,queueLength:0,finished:true});
     popup({type:"SCAN_FINISHED",checked,total});
     await closeAllOwnedTabs();
@@ -3486,18 +3563,19 @@ async function next(){
 
   await closeAllOwnedTabs();
   await sleep(randomDelay(BETWEEN_ITEMS_MIN,BETWEEN_ITEMS_MAX));
-  if(!running||!queue.length)return next();
+  if(!running||!queue.length)return nextInner();
 
   // The scanner window is shared with the trade worker (STN purchase and Steam
   // offers), so scanning waits while a trade is running.
   if(isTradeWorkBusy()){
     emitTradeAutomationStatus("Scanning is paused while a trade runs in the scanner window; it resumes when the trade finishes.");
     await waitForTradeIdle();
-    if(!running||!queue.length)return next();
+    if(!running||!queue.length)return nextInner();
   }
   scanItemBusy=true;
 
   const item=queue.shift();
+  scanCurrentItem=item;
   await saveState({finished:false});
   if(!running){scanItemBusy=false;return}
 
@@ -3512,8 +3590,34 @@ async function next(){
   // cannot be bought anyway.
   if(item.fromSaved){
     const savedFromScrap=item.source==="scrap.tf";
-    const stn=savedFromScrap?await refreshItemFromScrap(item):await refreshItemFromStn(item);
+    const siteLabel=savedFromScrap?"scrap.tf":"STN";
+    emitTradeAutomationStatus(`Checking saved item ${results.length+1}/${total}: ${item.name} (reading ${siteLabel}, then Backpack.tf)…`);
+    let stn=savedFromScrap?await refreshItemFromScrap(item):await refreshItemFromStn(item);
+    // A page that did not load or answer is tried once more before the item is
+    // given up on (the item is never removed from the saved list for this).
+    if(!stn.ok&&running&&SAVED_REFRESH_RETRY_REASON.test(String(stn.reason||""))){
+      emitTradeAutomationStatus(`${item.name}: ${stn.reason} Trying ${siteLabel} once more…`);
+      await sleep(randomDelay(3000,5000));
+      if(running)stn=savedFromScrap?await refreshItemFromScrap(item):await refreshItemFromStn(item);
+    }
     if(!running){scanItemBusy=false;return}
+    if(!stn.ok){
+      emitTradeAutomationStatus(`${item.name}: ${stn.reason}`);
+      // Several pages in a row that do not answer usually mean the site is
+      // throttling the scanner: give it a rest instead of hammering it.
+      if(SAVED_REFRESH_RETRY_REASON.test(String(stn.reason||""))){
+        savedRefreshFailures++;
+        if(savedRefreshFailures>=3){
+          savedRefreshFailures=0;
+          emitTradeAutomationStatus(`${siteLabel} did not answer for 3 saved items in a row. Pausing the check for ${Math.round(SAVED_BACKOFF_MS/1000)} seconds before going on.`);
+          const until=Date.now()+SAVED_BACKOFF_MS;
+          while(running&&Date.now()<until)await sleep(1000);
+          if(!running){scanItemBusy=false;return}
+        }
+      }
+    }else{
+      savedRefreshFailures=0;
+    }
     if(!stn.ok){
       await finish({
         name:item.name,
