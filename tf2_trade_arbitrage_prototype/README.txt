@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.133
+Current version 0.7.134
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.134 changes:
+- Everything to do with trade offers now happens in the main window instead of the scanner window: the Steam offer checks made while scanning (metal and bad-trader checks), the STN purchase, the purchase offer and the bot offers all open as an active tab in the main window. The tab you were on comes back when the offer tab closes. Backpack.tf and scrap.tf pages used for scanning still open in the scanner window. Only if no main window is known does an offer use the scanner window.
+- STN auto rescan: when a scan that read an STN page finishes, the add-on refreshes that stntrading.eu tab (the page it already has), presses PageDown 3 times (the page is scrolled one screen at a time, since a page ignores a synthetic key press) and starts the scan again by itself. It repeats until Stop is pressed or another scan is started. It waits 15 s between rounds, or 2 minutes when nothing new was queued (every item was checked within the last hour). Switch it off with the new checkbox in the popup. Saved-item and STN buy-price scans do not rescan.
 
 V0.7.133 changes:
 - After the scanner window opens (it comes up on top of iPhone Mirroring), the add-on asks the Mac confirmer to bring iPhone Mirroring back to the front (new endpoint POST /focus, about 1.2 s after the window exists). It does nothing when the Mac confirmer is not set up, and a failure never affects the scan.

@@ -65,6 +65,10 @@
     <input id="scrapSkipCraft" type="checkbox" checked>
     <span>scrap.tf: skip the Craft Hats section (hundreds of 1.77 ref hats that are almost never profitable)</span>
   </label>
+  <label class="automation-toggle">
+    <input id="stnAutoRescan" type="checkbox" checked>
+    <span>STN: when a scan finishes, refresh the stntrading.eu page, press PageDown 3 times and scan again (until Stop)</span>
+  </label>
   <button id="scanSaved" class="secondary" type="button" title="Reads the scrap.tf Buy Hats page once for all saved scrap.tf items, opens each saved STN item on stntrading.eu, and checks Backpack.tf for every item that is still listed">Check saved items (0)</button>
   <details id="savedTradesBox" class="api-settings">
     <summary>Saved Good Trades (<span id="savedCount">0</span>)</summary>
@@ -73,7 +77,7 @@
     <button id="clearSaved" class="secondary" type="button">Remove all saved items</button>
   </details>
   <div class="hint">Progress is saved automatically when this popup closes. Dismissed items stay dismissed until restored.</div>
-  <div class="hint">Backpack.tf scan pages, Steam offer checks, STN purchases and the Steam offers that follow them open in a separate “TF2 Arbitrage Scanner” window that closes when everything is finished. Scanning pauses while a trade runs in it. Keep it open and visible (not minimized); your main window is left alone, except for the Backpack.tf pages that are highlighted for you.</div>
+  <div class="hint">Backpack.tf scan pages open in a separate “TF2 Arbitrage Scanner” window that closes when everything is finished; keep it open and visible (not minimized). Everything to do with trade offers (Steam offer checks, STN purchases and the Steam offers that follow them) happens in your main window, one active tab at a time; the tab you were on comes back afterwards. Scanning pauses while a trade runs.</div>
   <div id="status">Open stntrading.eu and/or scrap.tf/buy/hats first (both are scanned together).</div>
   <div class="summary">
     <div><b id="total">0</b><span>items</span></div>

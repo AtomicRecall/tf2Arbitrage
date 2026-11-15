@@ -471,6 +471,9 @@ clearSteamApiKey.onclick=async()=>{
 const scrapSkipCraft=$("scrapSkipCraft");
 api.storage.local.get({scrapSkipCraft:true},v=>{scrapSkipCraft.checked=v.scrapSkipCraft!==false});
 scrapSkipCraft.onchange=()=>{storageSetLocal({scrapSkipCraft:scrapSkipCraft.checked}).catch(()=>{})};
+const stnAutoRescan=$("stnAutoRescan");
+api.storage.local.get({stnAutoRescan:true},v=>{stnAutoRescan.checked=v.stnAutoRescan!==false});
+stnAutoRescan.onchange=()=>{storageSetLocal({stnAutoRescan:stnAutoRescan.checked}).catch(()=>{})};
 const keepLogins=$("keepLogins");
 api.storage.local.get({keepLogins:true},v=>{keepLogins.checked=v.keepLogins!==false});
 keepLogins.onchange=()=>{storageSetLocal({keepLogins:keepLogins.checked}).catch(()=>{})};

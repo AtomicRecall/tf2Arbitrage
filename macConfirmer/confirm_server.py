@@ -260,8 +260,9 @@ class Confirmer:
 
     def _ask_for_phone(self, count):
         """Makes sure the phone is not in use before the Mac takes it over.
-        Returns True when the phone was seen on the confirmations page (the connection
-        retry clicks are then not needed)."""
+        Returns True only when the very first look found the phone on the confirmations page
+        (the connection retry clicks are then not needed). Any "not ready" first look, even one
+        that turns ready while waiting, returns False: the retry clicks are done."""
         state = self._phone_state()
         if state == "free":
             log("The phone is already on the confirmations page: no notification needed.")
@@ -285,7 +286,8 @@ class Confirmer:
             time.sleep(2.0)
             if self._phone_state() == "free":
                 time.sleep(1.5)
-                return True
+                # The first look said "not ready", so the connection retry clicks are still done.
+                return False
         log("The confirmations page did not show up in time; trying anyway.")
         return False
 

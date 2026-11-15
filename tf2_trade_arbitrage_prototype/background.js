@@ -15,6 +15,9 @@ let scanItemBusy=false;
 let tradeAutomationMessage="";
 const tradeEventWaiters=new Map();
 const transactionTabIds=new Set();
+// STN auto rescan: when a scan of the STN page finishes, the page is refreshed, PageDown
+// is pressed 3 times and the scan starts again by itself (see startAutoRescan).
+let autoRescanContext=null,autoRescanToken=0,scanQueuedCount=0;
 let hitAudio=null;
 let endAudio=null;
 let endSoundPlayed=false;
@@ -253,9 +256,38 @@ function createTransactionTab(url,active=false,windowId=sourceWindowId){
   return createTab(options);
 }
 
+// Everything to do with trade offers (STN purchases, Steam offers, the metal and
+// bad-trader checks of an offer) happens in the user's MAIN window, as an active
+// tab. The tab that was active before is brought back when the offer tab closes.
+// Only if no main window is known does it fall back to the scanner window.
+const offerTabPreviousActive=new Map();
+
+async function mainWindowIdIfOpen(){
+  return Number.isInteger(sourceWindowId)&&await getWindowIfOpen(sourceWindowId)?sourceWindowId:null;
+}
+
+async function createOfferTab(url){
+  const windowId=await mainWindowIdIfOpen();
+  if(!Number.isInteger(windowId))return createScanTab(url,true);
+  let previous=null;
+  try{previous=(await qTabs({active:true,windowId}))[0]||null}catch(error){}
+  const tab=await createTab({url,active:true,windowId});
+  if(Number.isInteger(tab?.id)&&Number.isInteger(previous?.id))offerTabPreviousActive.set(tab.id,previous.id);
+  return tab;
+}
+
+// Call after the offer tab was closed.
+async function restoreAfterOfferTab(tabId){
+  const previousId=offerTabPreviousActive.get(tabId);
+  offerTabPreviousActive.delete(tabId);
+  if(!Number.isInteger(previousId)||!await tabStillExists(previousId))return;
+  try{await updateTab(previousId,{active:true})}
+  catch(error){console.warn("Could not restore the original active tab after the offer tab closed:",error)}
+}
+
 // Reuse one transaction tab for the entire queued trade. STN, each purchase
 // offer and each bot offer replace one another in this dedicated tab, which
-// lives in the scanner window so the user's main window is left alone.
+// lives in the main window (see createOfferTab).
 async function getJobTransactionTab(job,url){
   let tab=null;
   if(Number.isInteger(job?.transactionTabId)){
@@ -265,10 +297,7 @@ async function getJobTransactionTab(job,url){
   if(tab){
     tab=await updateTab(tab.id,{url,active:true});
   }else{
-    // createScanTab opens the tab active in the scanner window (recreating that
-    // window if it was closed) and falls back to the main window only if a
-    // separate window cannot be opened.
-    tab=await createScanTab(url,true);
+    tab=await createOfferTab(url);
     if(!Number.isInteger(tab?.id))throw new Error("Browser did not return the trade transaction tab ID.");
     job.transactionTabId=tab.id;
     transactionTabIds.add(tab.id);
@@ -1815,6 +1844,7 @@ async function runTradeQueue(){
         const transactionTabId=activeTradeJob?.transactionTabId;
         if(Number.isInteger(transactionTabId)){
           await closeTabRobust(transactionTabId);
+          await restoreAfterOfferTab(transactionTabId);
           transactionTabIds.delete(transactionTabId);
           if(activeTradeJob?.transactionTabId===transactionTabId)delete activeTradeJob.transactionTabId;
         }
@@ -2027,21 +2057,11 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null,keyPa
   url.hash=verifyParams.toString();
 
   let tab=null;
-  let previouslyActiveTab=null;
-  let usedMainWindow=false;
   try{
-    // The check runs in the scanner window, so the user's window is never
-    // switched to the Steam tab. Only if that window cannot be opened do we
-    // fall back to the old behavior of using (and later restoring) the
-    // user's own window.
-    const checkWindowId=await scanWindowId();
-    usedMainWindow=Number.isInteger(sourceWindowId)&&checkWindowId===sourceWindowId;
-    if(usedMainWindow){
-      previouslyActiveTab=(await qTabs({active:true,windowId:sourceWindowId}))[0]||null;
-    }
     // Steam does not reliably initialize the other trader's inventory in a
-    // background tab, so the offer is the active tab of the scanner window.
-    tab=await createScanTab(url.href,true);
+    // background tab, so the offer is the active tab of the main window
+    // (the previously active tab comes back when the check is over).
+    tab=await createOfferTab(url.href);
     if(!Number.isInteger(tab?.id))throw new Error("Browser did not return an offer tab ID.");
     ownedTabIds.add(tab.id);
     ownedTabUrls.set(tab.id,url.href);
@@ -2092,15 +2112,9 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null,keyPa
       reason:`Could not open/read this Steam offer: ${String(error?.message||error)}`
     };
   }finally{
-    if(Number.isInteger(tab?.id))await closeTabRobust(tab.id);
-    if(usedMainWindow){
-      const restoreTabId=Number.isInteger(previouslyActiveTab?.id)
-        ?previouslyActiveTab.id
-        :sourceTabId;
-      if(Number.isInteger(restoreTabId)&&await tabStillExists(restoreTabId)){
-        try{await updateTab(restoreTabId,{active:true})}
-        catch(error){console.warn("Could not restore the original active tab after offer verification:",error)}
-      }
+    if(Number.isInteger(tab?.id)){
+      await closeTabRobust(tab.id);
+      await restoreAfterOfferTab(tab.id);
     }
   }
 }
@@ -2436,6 +2450,8 @@ async function stopScanningBecauseClosed(reason){
   running=false;
   queue=[];
   sourceTabId=null;
+  autoRescanContext=null;
+  autoRescanToken++;
   if(wasActive)emitTradeAutomationStatus(`${reason} Scanning was stopped; the results so far are saved.`);
   try{await closeCurrentTab()}catch(error){}
   try{await closeAllOwnedTabs()}catch(error){}
@@ -3601,6 +3617,7 @@ async function next(){
     if(scanStepErrors>=SCAN_MAX_STEP_ERRORS){
       running=false;
       queue=[];
+      autoRescanContext=null;
       await closeAllOwnedTabs().catch(()=>{});
       await saveState({running:false,queueLength:0}).catch(()=>{});
       popup({type:"SCAN_FINISHED",checked,total});
@@ -3641,6 +3658,12 @@ async function nextInner(){
     // worker closes it when it is done.
     await closeAutomationWindowIfIdle();
     if(naturalFinish)playEndSound();
+    if(naturalFinish&&autoRescanContext){
+      startAutoRescan(autoRescanContext).catch(error=>{
+        console.warn("Automatic rescan failed:",error);
+        emitTradeAutomationStatus(`The automatic rescan stopped: ${error?.message||error}`);
+      });
+    }
     return;
   }
 
@@ -3826,12 +3849,15 @@ async function nextInner(){
   await finish(result);
 }
 
-setInterval(()=>{if(running)saveState({finished:false})},CHECKPOINT_MS);
-
-api.runtime.onMessage.addListener((m,s,sendResponse)=>{
-  if(m.type==="START_SCAN"){
-    qTabs({active:true,currentWindow:true}).then(async tabs=>{
-      const tab=tabs[0];
+// Reads every STN / scrap.tf page open in the window and starts the scan. `m.tabId`
+// (used by the automatic rescan) names the tab to start from; without it the active
+// tab of the current window is used. `sendResponse` gets {ok,...}.
+function startItemScan(m,sendResponse){
+  const findTabs=Number.isInteger(m.tabId)
+    ?getTabInfo(m.tabId).then(tab=>tab?[tab]:[])
+    :qTabs({active:true,currentWindow:true});
+  findTabs.then(async tabs=>{
+    const tab=tabs[0];
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
       keyRate=+m.keyRate||63;
       // Every STN and scrap.tf page open in this window is read (the active tab
@@ -3924,18 +3950,85 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
         storageSet({tradeAutomationEnabled});
       }
       if(reverseByKey.size)sources["stn-reverse"]=reverseByKey.size;
-      queue=interleaveBySource(toScan);total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources,alreadyChecked:alreadyChecked.length});
       emitAlreadyChecked(alreadyChecked);
       emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
-      next();
-    });
+    next();
+  }).catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
+}
+
+const AUTO_RESCAN_PAUSE_MS=15000;
+// When nothing new was queued (every item was checked within the last hour) the
+// next round waits longer, so the STN page is not hammered.
+const AUTO_RESCAN_IDLE_PAUSE_MS=120000;
+
+// Waits `ms`, ending early (false) when the rescan was cancelled.
+async function autoRescanWait(token,ms){
+  const end=Date.now()+ms;
+  while(Date.now()<end){
+    if(token!==autoRescanToken||!autoRescanContext)return false;
+    await sleep(Math.min(1000,Math.max(50,end-Date.now())));
+  }
+  return token===autoRescanToken&&Boolean(autoRescanContext);
+}
+
+// A scan of an STN page finished: refresh that page (its own link), press PageDown
+// three times and scan again, until Stop is pressed or another scan is started.
+async function startAutoRescan(context){
+  const settings=await storageGet({stnAutoRescan:true});
+  if(settings.stnAutoRescan===false||!Number.isInteger(context?.stnTabId))return;
+  const token=++autoRescanToken;
+  const idle=scanQueuedCount===0;
+  const pause=idle?AUTO_RESCAN_IDLE_PAUSE_MS:AUTO_RESCAN_PAUSE_MS;
+  emitTradeAutomationStatus(`Scan finished. Refreshing the STN page and scanning again in ${Math.round(pause/1000)}s${idle?" (everything was checked recently)":""}. Press Stop to end this.`);
+  if(!await autoRescanWait(token,pause))return;
+  if(running)return;
+  const stnTab=await getTabInfo(context.stnTabId);
+  if(!stnTab||!/^https:\/\/(?:www\.)?stntrading\.eu\//i.test(String(stnTab.url||""))){
+    autoRescanContext=null;
+    emitTradeAutomationStatus("The STN page is no longer open, so the automatic rescan ended.");
+    return;
+  }
+  emitTradeAutomationStatus("Refreshing the STN page and pressing PageDown 3 times…");
+  try{await updateTab(stnTab.id,{active:true})}catch(error){}
+  const watch=watchTabNavigation(stnTab.id);
+  try{
+    await reloadTab(stnTab.id);
+    const deadline=Date.now()+30000;
+    while(!watch.complete&&Date.now()<deadline)await sleep(250);
+  }finally{watch.stop()}
+  if(token!==autoRescanToken||!autoRescanContext||running)return;
+  await sleep(1500);
+  let pressed=false;
+  const pressDeadline=Date.now()+10000;
+  while(!pressed&&Date.now()<pressDeadline){
+    try{pressed=Boolean((await msgTab(stnTab.id,{type:"PAGE_DOWN",times:3,delayMs:700}))?.ok)}
+    catch(error){await sleep(500)}
+  }
+  await sleep(2500);
+  if(token!==autoRescanToken||!autoRescanContext||running)return;
+  const origin=await getTabInfo(context.tabId);
+  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id},resolve));
+  if(!result?.ok){
+    autoRescanContext=null;
+    emitTradeAutomationStatus(`The automatic rescan ended: ${result?.error||"the scan could not start."}`);
+  }
+}
+
+setInterval(()=>{if(running)saveState({finished:false})},CHECKPOINT_MS);
+
+api.runtime.onMessage.addListener((m,s,sendResponse)=>{
+  if(m.type==="START_SCAN"){
+    autoRescanToken++;
+    startItemScan(m,sendResponse);
     return true;
   }
   if(m.type==="START_REVERSE_SCAN"){
     (async()=>{
       if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
+      autoRescanContext=null;autoRescanToken++;
       const tabs=await qTabs({active:true,currentWindow:true}).catch(()=>[]);
       const tab=tabs[0];
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
@@ -3981,6 +4074,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   if(m.type==="START_SAVED_SCAN"){
     (async()=>{
       if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
+      autoRescanContext=null;autoRescanToken++;
       const stored=await storageGet({[TF2SavedTrades.STORAGE_KEY]:{}});
       const saved=TF2SavedTrades.list(stored[TF2SavedTrades.STORAGE_KEY]);
       if(!saved.length){sendResponse({ok:false,error:"No saved items yet. Items are saved when they are found to be Good Trades."});return}
@@ -4007,6 +4101,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   }
   if(m.type==="STOP_SCAN"){
     running=false;queue=[];
+    autoRescanContext=null;autoRescanToken++;
     sourceTabId=null;
     closeCurrentTab()
       .then(()=>closeAllOwnedTabs())

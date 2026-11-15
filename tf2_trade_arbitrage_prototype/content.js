@@ -1772,7 +1772,41 @@
     });
   });
 
+  // Scrolls down like the PageDown key, `times` times. A page does not scroll for a
+  // synthetic key press, so the page is scrolled by one screen each time (the key
+  // events are sent too, for pages that listen for them). Used after the STN page is
+  // refreshed so the items that load while scrolling are on the page before it is read.
+  async function pressPageDown(times,delayMs){
+    const count=Math.max(1,Math.min(10,Math.round(Number(times))||3));
+    const wait=Math.max(100,Math.min(3000,Number(delayMs)||700));
+    const scroller=()=>{
+      if(document.scrollingElement&&document.scrollingElement.scrollHeight>window.innerHeight+4)return null;
+      let best=null;
+      for(const element of document.querySelectorAll("body *")){
+        if(element.scrollHeight<=element.clientHeight+4||element.clientHeight<200)continue;
+        const overflow=getComputedStyle(element).overflowY;
+        if(overflow!=="auto"&&overflow!=="scroll")continue;
+        if(!best||element.clientHeight*element.clientWidth>best.clientHeight*best.clientWidth)best=element;
+      }
+      return best;
+    };
+    for(let index=0;index<count;index++){
+      for(const type of ["keydown","keyup"]){
+        try{document.dispatchEvent(new KeyboardEvent(type,{key:"PageDown",code:"PageDown",keyCode:34,which:34,bubbles:true,cancelable:true}))}catch(error){}
+      }
+      const inner=scroller();
+      if(inner)inner.scrollBy({top:Math.round(inner.clientHeight*0.875),left:0,behavior:"instant"});
+      else window.scrollBy({top:Math.round(window.innerHeight*0.875),left:0,behavior:"instant"});
+      await new Promise(resolve=>setTimeout(resolve,wait));
+    }
+    return {ok:true,scrollY:Math.round(window.scrollY)};
+  }
+
   api.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
+    if(msg.type==="PAGE_DOWN"){
+      pressPageDown(msg.times,msg.delayMs).then(sendResponse).catch(error=>sendResponse({ok:false,reason:error?.message||String(error)}));
+      return true;
+    }
     if(msg.type==="READ_BUY_PAGE")sendResponse({items:readBuyPage()});
     if(msg.type==="SCRAP_BUY"){
       if(!isScrapTf()){sendResponse({ok:false,reason:"This is not a scrap.tf page."});return}

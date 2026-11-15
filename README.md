@@ -178,6 +178,11 @@ asks the confirm server on the same computer to shut down (`POST /shutdown`), wh
 quit Firefox and exit. Closing the Terminal or killing the launcher quits Firefox and the server too.
 Closing only the scanner window by hand stops a running scan.
 
+Anything to do with trade offers (the Steam offer checks while scanning, the STN purchase, the offers sent to bots)
+happens in the main window, as an active tab; the tab you were on comes back afterwards. When a scan of an STN
+page finishes, the add-on refreshes that STN tab, presses PageDown 3 times and scans again until you press Stop
+(checkbox in the popup to turn it off).
+
 When the scanner window opens it comes up on top of iPhone Mirroring, so the add-on then asks the confirm server
 (`POST /focus`) to bring iPhone Mirroring back to the front. This only happens when the Mac confirmer is set up
 in the popup, and nothing is clicked.
@@ -235,7 +240,8 @@ already on the confirmations page, so no "Lock your iPhone" message is sent and 
 colour, the message is sent and the Mac starts as soon as the colour shows up (at most `--phone-wait`, 120 s). When
 the confirmations are done and nothing else is waiting, a second message, "You can use your phone", is sent (only if
 the first one was). When the spot shows the confirmations page, the run also skips the connection retry clicks
-(`TIMEOUT_RETRY_BUTTON` and `SECOND_RETRY_BUTTON`) and their 9-11 s wait, since the page is already there.
+(`TIMEOUT_RETRY_BUTTON`, `SECOND_RETRY_BUTTON` and `THIRD_RETRY_BUTTON`) and their 9-11 s wait, since the page is already there. Whenever the first check says "not ready" (even if the
+page shows up while waiting), or the check cannot run, the three retry clicks are done.
 
 ```bash
 python3 macConfirmer/confirm_server.py --pick-phone-spot        # put the mouse on the spot within 5 s; the phone must show the confirmations page
