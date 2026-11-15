@@ -145,10 +145,42 @@
   }
   function scrapClearSearch(){
     const input=scrapSearchInput();
-    if(input&&input.value)scrapSetSearch(input,"");
+    if(!input||!input.value)return;
+    scrapSetSearch(input,"");
+    // A page script can put the text back or ignore the events; set it directly.
+    if(input.value)input.value="";
+  }
+  function scrapCountShown(){
+    return [...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")].filter(scrapShown).length;
+  }
+  // Empties the search box and waits until the list shows as many items as it did
+  // before the search (the filter is lifted), trying the clear a second time.
+  async function scrapRestoreSearch(shownBefore){
+    for(let attempt=0;attempt<2;attempt++){
+      scrapClearSearch();
+      const deadline=Date.now()+1500;
+      while(Date.now()<deadline){
+        const input=scrapSearchInput();
+        if((!input||!input.value)&&scrapCountShown()>=shownBefore)return true;
+        await scrapSleep(150);
+      }
+    }
+    console.warn("TF2 Arbitrage: the scrap.tf search box or item list was not restored after the purchase attempt.");
+    return false;
   }
 
+  // The search text never stays behind: it is cleared however the attempt ends
+  // (item bought, price rose, nothing selectable, checkout unavailable, error).
   async function scrapBuy(name,quantity,maxScrapValue){
+    const shownBefore=scrapCountShown();
+    try{
+      return await scrapBuyWithSearch(name,quantity,maxScrapValue);
+    }finally{
+      await scrapRestoreSearch(shownBefore);
+    }
+  }
+
+  async function scrapBuyWithSearch(name,quantity,maxScrapValue){
     const wanted=Math.max(1,Math.floor(Number(quantity))||1);
     const target=normalizeName(name);
     const allTiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
@@ -166,7 +198,6 @@
       if(showing.length)tiles=showing;
     }
     if(!tiles.length){
-      scrapClearSearch();
       return {ok:false,reason:`${name} is no longer listed on scrap.tf.`};
     }
     const limit=Number(maxScrapValue);
