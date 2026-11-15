@@ -213,6 +213,16 @@ clicking in the Steam app through iPhone Mirroring. Notes:
 Run the server by hand with `macConfirmer/run_server.sh` (add `--dry-run` to test). In the sidebar's
 *Mac confirmer* section enter its address and token and press *Test connection*.
 
+**Phone notification.** iPhone Mirroring only works while the phone is locked and not in use, so before
+every confirmation run the server sends a push notification, "Lock your iPhone", and then waits 20 seconds
+(`--notify-lead`) before it clicks. It also notifies you when a run failed and the server paused. It uses
+[ntfy](https://ntfy.sh): install the free ntfy app on the iPhone and subscribe to the topic the server prints
+at start (a random name kept in the git-ignored `macConfirmer/server_config.json`; anyone who knows it can send
+you messages, so keep it private). Try it with `python3 confirm_server.py --test-notification`. The messages
+only contain the number of trades and, for a failure, the error text, never item names, offer ids or
+account details. `--no-notify` switches it off, `--ntfy-topic` / `--ntfy-server` change where it goes
+(for example a self-hosted ntfy). In `--dry-run` nothing is sent.
+
 ---
 
 ## Safety and limits

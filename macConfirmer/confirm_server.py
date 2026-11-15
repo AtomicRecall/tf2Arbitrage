@@ -38,6 +38,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -68,6 +69,62 @@ def log(message):
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
+# ---- phone notification (ntfy) ---------------------------------------------------
+# The Mac drives the iPhone through iPhone Mirroring, which only works while the
+# phone is locked and not in use. Before each run the server sends a push
+# notification (through ntfy, https://ntfy.sh) so you can put the phone down. The
+# message is generic: no item, offer or account information is sent. The topic is a
+# random name created on first start and kept in server_config.json (it is the only
+# "password" of the channel, so keep it private); subscribe to it in the ntfy app.
+DEFAULT_NTFY_SERVER = "https://ntfy.sh"
+
+
+def load_ntfy_topic():
+    config = {}
+    if CONFIG_FILE.exists():
+        config = json.loads(CONFIG_FILE.read_text())
+    topic = config.get("ntfy_topic")
+    if not topic:
+        topic = "tf2-confirm-" + secrets.token_urlsafe(12).replace("_", "x").replace("-", "y")
+        config["ntfy_topic"] = topic
+        CONFIG_FILE.write_text(json.dumps(config))
+        try:
+            CONFIG_FILE.chmod(0o600)
+        except OSError:
+            pass
+    return topic
+
+
+class Notifier:
+    """Sends a short push message to the phone. Never raises; it never blocks a run
+    for longer than the request timeout."""
+
+    def __init__(self, server, topic):
+        self.server = (server or DEFAULT_NTFY_SERVER).rstrip("/")
+        self.topic = topic
+
+    @property
+    def enabled(self):
+        return bool(self.topic)
+
+    def send(self, title, message, priority="high", tags="lock"):
+        if not self.enabled:
+            return False
+        request = urllib.request.Request(
+            f"{self.server}/{self.topic}",
+            data=message.encode("utf-8"),
+            method="POST",
+            headers={"Title": title, "Priority": priority, "Tags": tags},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=8):
+                pass
+            return True
+        except Exception as error:  # offline, DNS, HTTP error ...
+            log(f"Could not send the phone notification: {error}")
+            return False
+
+
 def preflight(dry_run):
     """Checks, at start-up, the things that make clicks silently do nothing."""
     if dry_run:
@@ -87,7 +144,9 @@ def preflight(dry_run):
 class Confirmer:
     """Owns the queue and the single worker that performs the clicks."""
 
-    def __init__(self, dry_run, min_delay, max_delay, max_per_hour):
+    def __init__(self, dry_run, min_delay, max_delay, max_per_hour, notifier=None, notify_lead=0.0):
+        self.notifier = notifier or Notifier(None, "")
+        self.notify_lead = max(0.0, notify_lead)
         self.dry_run = dry_run
         self.min_delay, self.max_delay = min_delay, max_delay
         self.max_per_hour = max_per_hour
@@ -181,6 +240,16 @@ class Confirmer:
         while True:
             count, ids = self._next_batch()
             try:
+                # The phone has to be locked and unused while the Mac clicks on it.
+                if not self.dry_run and self.notifier.enabled:
+                    sent = self.notifier.send(
+                        "Lock your iPhone",
+                        f"{count} trade{'s' if count != 1 else ''} to confirm. Put your phone down and lock it now: "
+                        f"the Mac takes it over in {int(self.notify_lead)} seconds.",
+                    )
+                    if sent:
+                        log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
+                        time.sleep(self.notify_lead)
                 delay = random.uniform(self.min_delay, self.max_delay)
                 log(f"Accepting {count} trade{'s' if count != 1 else ''} in {delay:.1f}s…")
                 time.sleep(delay)
@@ -198,6 +267,12 @@ class Confirmer:
                     self.paused_reason = reason
                     self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": False, "error": reason})
                 log(f"FAILED: {reason}. Paused until POST /resume.")
+                if not self.dry_run:
+                    self.notifier.send(
+                        "Confirming trades failed",
+                        f"The Mac could not accept the trade confirmation and paused: {reason[:150]}",
+                        priority="high", tags="warning",
+                    )
             finally:
                 with self.cond:
                     self.busy = False
@@ -288,6 +363,12 @@ def main():
     parser.add_argument("--min-delay", type=float, default=3.0, help="minimum seconds before each run (default 3)")
     parser.add_argument("--max-delay", type=float, default=10.0, help="maximum seconds before each run (default 10)")
     parser.add_argument("--max-per-hour", type=int, default=30, help="confirmations allowed per hour (default 30)")
+    parser.add_argument("--no-notify", action="store_true", help="do not send phone notifications")
+    parser.add_argument("--ntfy-topic", help="ntfy topic to notify (default: a random one kept in server_config.json)")
+    parser.add_argument("--ntfy-server", default=DEFAULT_NTFY_SERVER, help="ntfy server (default %(default)s)")
+    parser.add_argument("--notify-lead", type=float, default=20.0,
+                        help="seconds to wait after the notification before clicking, so you can lock the phone (default %(default)s)")
+    parser.add_argument("--test-notification", action="store_true", help="send one test notification and exit")
     parser.add_argument("--wheel-events", type=int, default=confirm_trades.WHEEL_EVENTS)
     parser.add_argument("--wheel-lines", type=int, default=confirm_trades.WHEEL_LINES)
     parser.add_argument("--refresh-y-offset", type=int, default=confirm_trades.REFRESH_Y_OFFSET)
@@ -302,13 +383,25 @@ def main():
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
     confirm_trades.CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
 
+    notifier = Notifier(args.ntfy_server, "" if args.no_notify else (args.ntfy_topic or load_ntfy_topic()))
+    if args.test_notification:
+        if not notifier.enabled:
+            sys.exit("Notifications are switched off (--no-notify).")
+        ok = notifier.send("Test notification", "The TF2 confirmer can reach your phone.", priority="default", tags="white_check_mark")
+        print("Sent." if ok else "Not sent (see the message above).")
+        sys.exit(0 if ok else 1)
     preflight(args.dry_run)
     token = load_token()
     allowed = {ipaddress.ip_address(item) for item in args.allow}
-    confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour)
+    confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour, notifier, args.notify_lead)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(confirmer, token, allowed))
     log(f"Listening on {args.host}:{args.port}{' (DRY RUN: no clicks)' if args.dry_run else ''}")
     log(f"Token: {token}")
+    if notifier.enabled:
+        log(f"Phone notifications: install the ntfy app and subscribe to the topic \"{notifier.topic}\" "
+            f"on {notifier.server} (lock-screen alerts before each confirmation run, {args.notify_lead:.0f}s ahead).")
+    else:
+        log("Phone notifications are off.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
