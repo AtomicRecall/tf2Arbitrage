@@ -35,6 +35,10 @@ Mac confirmation server alongside it.
 Both start the real server (clicks on). For the dry run in step 4, use `python3 browserShell/launch.py --server-dry-run`.
 Close Firefox to stop everything.
 
+**Logs.** Firefox's console chatter (such as the `sandbox_extension_issue_file_to_process failed ... Operation not permitted` lines, which are harmless) is always written to `~/Library/Logs/TF2Trader/firefox.log` instead of the window. `python3 browserShell/launch.py --quiet` also writes the launcher and confirm server output to `launcher.log` and `server.log` there, so the window stays empty (`--log-dir` changes the folder).
+
+On a Mac the launcher opens Firefox through macOS (`open -W -n -a`), like double-clicking it, instead of running it as a child of Terminal. Run that way it should no longer print the `sandbox_extension_issue_file_to_process` lines at all. `--direct` goes back to running the Firefox binary itself.
+
 ## Scanning and buying on scrap.tf
 
 Everything that works on Windows works the same here: the add-on is the same code, only the browser

@@ -1403,12 +1403,217 @@ async function runPendingResends(hostJob){
   }
 }
 
+// ---- Raw key budget -----------------------------------------------------------
+// STN and scrap.tf build their own Steam offers, and when the inventory does not
+// hold exactly what a price asks for they convert metal into keys (or keys into
+// metal) at their own, worse rate. The sites cannot be told what to take, so a
+// key-priced item is only bought when the inventory holds enough raw keys for the
+// key part of its price. When the keys do not cover the whole job the order
+// changes from buy, buy, buy, sell, sell, sell to buy, sell, buy, sell: buy what
+// the keys cover, sell it, wait until the sales have brought keys back, then buy
+// the next part.
+const TF2_KEY_ITEM_NAME="Mann Co. Supply Crate Key";
+const KEY_POLL_MS=20000;
+const KEY_READ_RETRY_MS=8000;
+const KEY_READ_MAX_FAILURES=4;
+const KEY_WAIT_MAX_MS=45*60*1000;
+const KEY_WAIT_NOTE_MS=5*60*1000;
+let ownSteamId="";
+
+// The SteamID64 of the account signed in to steamcommunity.com in this browser.
+async function findOwnSteamId(){
+  if(/^\d{17}$/.test(ownSteamId))return ownSteamId;
+  try{
+    // steamLoginSecure starts with the SteamID64.
+    const cookie=await api.cookies.get({url:"https://steamcommunity.com/",name:"steamLoginSecure"});
+    const match=String(cookie?.value||"").match(/^(\d{17})/);
+    if(match)return ownSteamId=match[1];
+  }catch(error){console.warn("Could not read the Steam login cookie:",error)}
+  const response=await fetch("https://steamcommunity.com/my/",{credentials:"include"});
+  const fromUrl=response.url.match(/\/profiles\/(\d{17})/);
+  if(fromUrl)return ownSteamId=fromUrl[1];
+  const fromPage=(await response.text()).match(/"steamid"\s*:\s*"(\d{17})"/);
+  if(fromPage)return ownSteamId=fromPage[1];
+  throw new Error("could not find out which Steam account is signed in (sign in to steamcommunity.com in this browser)");
+}
+
+// How many tradable Mann Co. Supply Crate Keys the signed-in account holds.
+async function fetchRawKeyCount(){
+  const steamId=await findOwnSteamId();
+  let keys=0;
+  let startAssetId="";
+  for(let page=0;page<10;page++){
+    const url=new URL(`https://steamcommunity.com/inventory/${steamId}/440/2`);
+    url.searchParams.set("l","english");
+    url.searchParams.set("count","2000");
+    if(startAssetId)url.searchParams.set("start_assetid",startAssetId);
+    const response=await fetch(url.href,{credentials:"include",cache:"no-store"});
+    if(response.status===429)throw new Error("Steam is rate limiting inventory requests (HTTP 429)");
+    if(!response.ok)throw new Error(`Steam did not return the TF2 inventory (HTTP ${response.status})`);
+    const data=await response.json();
+    // Steam answers an empty inventory with null.
+    if(data===null)return keys;
+    if(!Array.isArray(data.assets))throw new Error("Steam returned an inventory page without items");
+    const keyClasses=new Set((Array.isArray(data.descriptions)?data.descriptions:[])
+      .filter(description=>description?.market_hash_name===TF2_KEY_ITEM_NAME&&Number(description.tradable)===1)
+      .map(description=>`${description.classid}_${description.instanceid}`));
+    for(const asset of data.assets){
+      if(keyClasses.has(`${asset.classid}_${asset.instanceid}`))keys+=Math.max(1,Number(asset.amount)||1);
+    }
+    if(!data.more_items)return keys;
+    startAssetId=String(data.last_assetid||"");
+    if(!startAssetId)break;
+  }
+  return keys;
+}
+
+// Raw keys one item of the job costs (0 when its price has no key part).
+function keysPerItem(job){
+  const price=parsePrice(job?.buyPriceText);
+  const keys=price?Number(price.keys):0;
+  return Number.isFinite(keys)&&keys>0?Math.ceil(keys):0;
+}
+
+// The first `quantity` items of the listings, and the listings of the rest.
+function splitListings(listings,quantity){
+  const taken=limitListingsToQuantity(listings,quantity);
+  let skip=totalListingItemQuantity(taken);
+  const rest=[];
+  for(const listing of Array.isArray(listings)?listings:[]){
+    const requested=listingItemQuantity(listing);
+    if(requested<=0)continue;
+    if(skip>=requested){skip-=requested;continue}
+    if(skip>0){
+      rest.push({...listing,listedQuantity:listing.listedQuantity??requested,quantity:requested-skip});
+      skip=0;
+    }else{
+      rest.push({...listing});
+    }
+  }
+  return {taken,rest};
+}
+
+const keyPlural=count=>`${count} key${count===1?"":"s"}`;
+
+// Decides how many of the `remaining` items may be bought next. Returns
+//   {amount, limited}  buy `amount` now (limited: the keys cover fewer than remaining),
+//   {sellFirst:true}   no key is free but items bought earlier are still unsold,
+//   {stop:"reason"}    give up on the rest of this job.
+// It reads the real key count from the Steam inventory first; when not even one
+// item is affordable it waits for the bot offers that are still out to bring keys
+// back.
+async function planKeyPurchase(job,remaining){
+  const perItem=keysPerItem(job);
+  if(!perItem)return {amount:remaining,limited:false};
+  const startedAt=Date.now();
+  let lastNoteAt=0;
+  let failures=0;
+  for(;;){
+    let keys;
+    try{
+      keys=await fetchRawKeyCount();
+      failures=0;
+    }catch(error){
+      failures++;
+      if(failures<KEY_READ_MAX_FAILURES){await sleep(KEY_READ_RETRY_MS);continue}
+      return {amount:0,stop:`Could not read how many raw keys you hold (${error?.message||error}), so the rest of ${job.name} was not bought: it costs ${keyPlural(perItem)} each and the sites convert metal into keys at their own rate.`};
+    }
+    const affordable=Math.floor(keys/perItem);
+    if(affordable>=1){
+      const amount=Math.min(remaining,affordable);
+      emitTradeAutomationStatus(`You hold ${keyPlural(keys)}; ${job.name} costs ${keyPlural(perItem)} each, so ${amount} of ${remaining} can be paid with raw keys now${amount<remaining?`. The other ${remaining-amount} are bought after the sales bring keys back (buy, sell, buy, sell)`:""}.`);
+      return {amount,limited:amount<remaining};
+    }
+    if((Number(job.purchasedQuantity)||0)>(Number(job.soldQuantity)||0))return {amount:0,sellFirst:true};
+    const salesPending=trackedBotOffers.size>0||tradeAutomationQueue.some(queued=>queued.resendOf);
+    if(!salesPending){
+      return {amount:0,stop:`You hold ${keyPlural(keys)} but ${job.name} costs ${keyPlural(perItem)} each, and no sale is waiting that could bring more, so the rest of it was not bought (the sites would convert metal into keys at their own rate).`};
+    }
+    if(Date.now()-startedAt>=KEY_WAIT_MAX_MS){
+      return {amount:0,stop:`Still only ${keyPlural(keys)} after waiting ${Math.round(KEY_WAIT_MAX_MS/60000)} minutes for sales to bring keys back (${job.name} costs ${keyPlural(perItem)} each), so the rest of it was not bought.`};
+    }
+    if(!tradeAutomationEnabled&&!job.forceManual)return {amount:0,stop:`Automatic trading was turned off while waiting for keys; the rest of ${job.name} was not bought.`};
+    if(Date.now()-lastNoteAt>=KEY_WAIT_NOTE_MS){
+      lastNoteAt=Date.now();
+      emitTradeAutomationStatus(`You hold ${keyPlural(keys)} and ${job.name} costs ${keyPlural(perItem)} each. Waiting for the sent bot offers to be accepted so their keys can pay for the next one…`);
+    }
+    await runPendingResends(job);
+    await sleep(KEY_POLL_MS);
+  }
+}
+
+// Opens the Backpack.tf pages of `listings`, highlights them and sends one bot
+// offer per listing.
+async function sellListings(job,listings){
+  if(!listings.length)return;
+  job.step="highlighting-profitable-listings";
+  emitTradeAutomationStatus(`Opening Backpack.tf pages for ${listings.length} verified offers covering ${totalListingItemQuantity(listings)} items and highlighting each listing…`);
+  // The Backpack.tf pages open in the scanner window, never in the main one.
+  const backpackPages=await openAndHighlightBackpackPages(
+    listings,
+    job.name,
+    job.backpackUrl,
+    job.windowId,
+    true,
+    true
+  );
+  const backpackTabs=backpackPages.tabs;
+  if(backpackPages.missing.length||backpackPages.errors.length){
+    emitTradeAutomationStatus(
+      `Highlighted ${backpackPages.highlighted}/${listings.length} verified Backpack.tf offers across ${backpackPages.pages} pages. Some listings were not present on their recorded page; continuing with the exact Steam offer links.`
+    );
+  }else{
+    emitTradeAutomationStatus(`Highlighted all ${backpackPages.highlighted} verified Backpack.tf listings across ${backpackPages.pages} page${backpackPages.pages===1?"":"s"}.`);
+  }
+  try{
+    job.step="sending-bot-offers";
+    for(let index=0;index<listings.length;index++){
+      // A cancelled offer is re-sent before the next new offer goes out.
+      await runPendingResends(job);
+      const listing=listings[index];
+      const reservedAssets=[...new Set([...job.usedAssetIds,...[...trackedBotOffers.values()].flatMap(entry=>entry.assetIds)])];
+      job.sendSeq=(Number(job.sendSeq)||0)+1;
+      const {usedNow,tradeOfferId}=await sendBotOffer(job,listing,{index:index+1,total:listings.length,verb:"Sending",operationId:`${job.id}:listing:${job.sendSeq}`},reservedAssets);
+      // Remember exactly which copies this offer used so no later offer
+      // contains the same item.
+      job.usedAssetIds=[...new Set([...job.usedAssetIds,...usedNow])];
+      trackSentBotOffer({offerId:tradeOfferId,itemName:job.name,listing,assetIds:usedNow,windowId:job.windowId,jobId:job.id,resends:0});
+    }
+  }finally{
+    await Promise.all(backpackTabs.map(async tab=>{
+      await closeTabRobust(tab.id);
+      transactionTabIds.delete(tab.id);
+    }));
+  }
+}
+
+// Sells the items of this job that were bought and not sold yet (all of the
+// remaining listings when `all` is set: a job that uses existing inventory).
+async function sellUnsold(job,all=false){
+  const pending=Array.isArray(job.pendingListings)?job.pendingListings:[];
+  const sold=Number(job.soldQuantity)||0;
+  const quantity=all?totalListingItemQuantity(pending):Math.max(0,(Number(job.purchasedQuantity)||0)-sold);
+  if(quantity<=0||!pending.length)return;
+  const {taken,rest}=splitListings(pending,quantity);
+  job.pendingListings=rest;
+  job.soldQuantity=sold+totalListingItemQuantity(taken);
+  await sellListings(job,taken);
+  // All bot offers of the job have been sent.
+  if(job.soldQuantity>=job.quantity)playTradeMilestoneSound("middle2.wav");
+}
+
 async function executeTradeJob(job){
   if(!Number.isInteger(job.windowId))throw new Error("The original Firefox window is no longer available for the trade workflow.");
   if(job.resendOf)return executeResendJob(job);
   job.purchasedQuantity=0;
   job.purchaseOfferIds=[];
   job.usedAssetIds=[];
+  // Listings still to be sold, and how many items were already sold (see the raw
+  // key budget above: with too few keys the job buys and sells in parts).
+  job.pendingListings=job.listings.map(listing=>({...listing}));
+  job.soldQuantity=0;
+  job.sendSeq=0;
+  job.keyLimited=false;
   const sellerLabel=job.source==="scrap.tf"?"scrap.tf":"STN";
   if(!job.skipPurchase){
     steamApiKey=await loadSteamWebApiKey();
@@ -1422,8 +1627,23 @@ async function executeTradeJob(job){
   }else{
     let batchNumber=0;
     while(job.purchasedQuantity<job.quantity){
+      const stillWanted=job.quantity-job.purchasedQuantity;
+      // Key-priced items are only bought with raw keys: how many can be paid now?
+      const plan=await planKeyPurchase(job,stillWanted);
+      if(plan.stop){
+        job.keyShortage=plan.stop;
+        emitTradeAutomationStatus(plan.stop);
+        break;
+      }
+      if(plan.sellFirst){
+        job.keyLimited=true;
+        emitTradeAutomationStatus(`Not enough raw keys for another ${job.name} yet. Selling the ${(Number(job.purchasedQuantity)||0)-(Number(job.soldQuantity)||0)} already bought first, then buying the rest once their keys are back.`);
+        await sellUnsold(job);
+        continue;
+      }
+      if(plan.limited)job.keyLimited=true;
       batchNumber++;
-      const remaining=job.quantity-job.purchasedQuantity;
+      const remaining=plan.amount;
       job.purchaseProgress=null;
       job.purchaseOfferId="";
       job.purchaseTabId=null;
@@ -1462,51 +1682,16 @@ async function executeTradeJob(job){
       // (The middle1/middle2 sound for this trade already played when the
       // accept went through, inside acceptStnPurchaseBatch.)
       emitTradeAutomationStatus(`Confirmed ${sellerLabel} batch ${batchNumber}: Steam Web API state 3 accepted ${job.purchasedQuantity}/${job.quantity} ${job.name} item${job.purchasedQuantity===1?"":"s"}.`);
+      // Keys are short: sell what was just bought before buying the next part.
+      if(job.keyLimited)await sellUnsold(job);
       // A cancelled bot offer takes priority over the next STN batch.
       await runPendingResends(job);
     }
   }
 
-  job.step="highlighting-profitable-listings";
-  emitTradeAutomationStatus(`Opening Backpack.tf pages for ${job.listings.length} verified offers covering ${job.quantity} items and highlighting each listing…`);
-  // The Backpack.tf pages open in the scanner window, never in the main one.
-  const backpackPages=await openAndHighlightBackpackPages(
-    job.listings,
-    job.name,
-    job.backpackUrl,
-    job.windowId,
-    true,
-    true
-  );
-  const backpackTabs=backpackPages.tabs;
-  if(backpackPages.missing.length||backpackPages.errors.length){
-    emitTradeAutomationStatus(
-      `Highlighted ${backpackPages.highlighted}/${job.listings.length} verified Backpack.tf offers across ${backpackPages.pages} pages. Some listings were not present on their recorded page; continuing with the exact Steam offer links.`
-    );
-  }else{
-    emitTradeAutomationStatus(`Highlighted all ${backpackPages.highlighted} verified Backpack.tf listings across ${backpackPages.pages} page${backpackPages.pages===1?"":"s"}.`);
-  }
-  try{
-    job.step="sending-bot-offers";
-    for(let index=0;index<job.listings.length;index++){
-      // A cancelled offer is re-sent before the next new offer goes out.
-      await runPendingResends(job);
-      const listing=job.listings[index];
-      const reservedAssets=[...new Set([...job.usedAssetIds,...[...trackedBotOffers.values()].flatMap(entry=>entry.assetIds)])];
-      const {usedNow,tradeOfferId}=await sendBotOffer(job,listing,{index:index+1,total:job.listings.length,verb:"Sending"},reservedAssets);
-      // Remember exactly which copies this offer used so no later offer
-      // contains the same item.
-      job.usedAssetIds=[...new Set([...job.usedAssetIds,...usedNow])];
-      trackSentBotOffer({offerId:tradeOfferId,itemName:job.name,listing,assetIds:usedNow,windowId:job.windowId,jobId:job.id,resends:0});
-    }
-    // All Backpack.tf bot offers have been sent.
-    playTradeMilestoneSound("middle2.wav");
-  }finally{
-    await Promise.all(backpackTabs.map(async tab=>{
-      await closeTabRobust(tab.id);
-      transactionTabIds.delete(tab.id);
-    }));
-  }
+  // Sell what is still unsold (everything bought, or the whole job when it uses
+  // existing inventory).
+  await sellUnsold(job,job.skipPurchase);
 }
 
 // Every accepted purchase is kept (browser storage, key purchaseLog) so the
@@ -1577,6 +1762,8 @@ async function runTradeQueue(){
         await executeTradeJob(activeTradeJob);
         if(activeTradeJob.resendOf){
           emitTradeAutomationStatus(`Re-sent the offer for ${activeTradeJob.name} that Steam cancelled (attempt ${activeTradeJob.resendCount}). It is tracked until Steam reports it Accepted.`);
+        }else if(activeTradeJob.keyShortage){
+          emitTradeAutomationStatus(`${activeTradeJob.name} ended early: bought ${Number(activeTradeJob.purchasedQuantity)||0}/${activeTradeJob.quantity} and sent bot offers for ${Number(activeTradeJob.soldQuantity)||0}. The rest was left because of the raw key limit.`);
         }else{
           emitTradeAutomationStatus(`Submitted ${activeTradeJob.offerCount} distinct bot offer${activeTradeJob.offerCount===1?"":"s"} covering ${activeTradeJob.quantity} ${activeTradeJob.name} item${activeTradeJob.quantity===1?"":"s"}${activeTradeJob.skipPurchase?` using existing inventory (${activeTradeJob.source==="scrap.tf"?"scrap.tf":"STN"} skipped)`:` after accepting the full quantity from ${activeTradeJob.source==="scrap.tf"?"scrap.tf":"STN"}`}. Steam is watched for cancelled offers (Items Now Unavailable For Trade), which are sent again until accepted.`);
         }
@@ -1589,7 +1776,7 @@ async function runTradeQueue(){
           const purchaseNote=activeTradeJob.skipPurchase
             ?" STN was skipped; the trade used existing inventory."
             :purchased>0
-              ?` STN purchase confirmed ${purchased}/${activeTradeJob.quantity} items${purchased<activeTradeJob.quantity?"; no bot offers were sent because the full target was not met":""}.`
+              ?` STN purchase confirmed ${purchased}/${activeTradeJob.quantity} items${purchased<activeTradeJob.quantity&&!activeTradeJob.soldQuantity?"; no bot offers were sent because the full target was not met":""}.`
               :"";
           emitTradeAutomationStatus(`Stopped ${activeTradeJob.name} workflow:${purchaseNote} ${error.message||error}. Remaining bot offers for this item were not attempted.`);
         }
@@ -1644,10 +1831,16 @@ function inFlightTradeQuantities(){
   }
   if(activeTradeJob){
     // Offers the running job already sent are counted above through tracking.
-    const alreadyTracked=activeTradeJob.trackedListingKeys;
-    for(const listing of activeTradeJob.listings||[]){
-      if(alreadyTracked?.has(tradeListingKey(activeTradeJob.name,listing)))continue;
-      add(activeTradeJob.name,listing,listingItemQuantity(listing));
+    // Once the job tracks its own unsold part (pendingListings), that part is
+    // counted as it is; offers already sent are counted through tracking.
+    if(Array.isArray(activeTradeJob.pendingListings)){
+      for(const listing of activeTradeJob.pendingListings)add(activeTradeJob.name,listing,listingItemQuantity(listing));
+    }else{
+      const alreadyTracked=activeTradeJob.trackedListingKeys;
+      for(const listing of activeTradeJob.listings||[]){
+        if(alreadyTracked?.has(tradeListingKey(activeTradeJob.name,listing)))continue;
+        add(activeTradeJob.name,listing,listingItemQuantity(listing));
+      }
     }
   }
   return quantities;

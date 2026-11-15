@@ -153,6 +153,17 @@ Good Trade the bot then:
 3. sends the verified Backpack.tf offers, one hat set per buyer, using different copies each time,
 4. tracks them and re-sends any Steam cancelled.
 
+**Raw keys only.** STN and scrap.tf build their own Steam offers and convert metal into keys at their
+own rate when your inventory does not hold what a price asks for, and that cannot be changed from here.
+So before every purchase of a key-priced hat (a price like *5 keys, 53 ref*) the add-on reads how many
+Mann Co. Supply Crate Keys your signed-in Steam account holds and buys only as many hats as those keys
+pay for. If the keys cover the whole quantity nothing changes (buy all, then sell all). If they do not,
+it works as *buy, sell, buy, sell*: it buys what the keys cover, sends the bot offers for those hats,
+waits until accepted offers have brought keys back (checked every 20 seconds, up to 45 minutes), then
+buys and sells the next part. This also holds between different hats in the queue. If no pending sale
+could bring more keys, or your key count cannot be read, the rest is not bought and the status box
+says why. Hats priced only in metal are not affected. Metal is not budgeted, only keys.
+
 If scrap.tf only allows part of a quantity at once, it buys in batches. The status box in the sidebar
 shows the current step. Sounds follow the same pattern for both sites: `middle1.wav` when a
 purchase is accepted and more is coming, `middle2.wav` when it was the last and again after the last

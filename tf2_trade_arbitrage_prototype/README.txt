@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.121
+Current version 0.7.122
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.122 changes:
+- Raw keys only: STN and scrap.tf build their own Steam offers and convert metal into keys at their own rate when the inventory does not hold what a price asks for. Before every purchase of a key-priced item (a price like "5 keys, 53 ref") the add-on now reads how many Mann Co. Supply Crate Keys the signed-in Steam account holds (TF2 inventory) and buys only as many items as those keys pay for.
+- When the keys cover the whole job nothing changes (buy everything, then sell everything). When they do not, the order becomes buy, sell, buy, sell: it buys what the keys cover, sends the bot offers for those items, waits until accepted bot offers have brought keys back (checked every 20 seconds, up to 45 minutes), then buys the next part and sells it. Items already bought are always sold before waiting. If no sale is pending that could bring more keys, or the key count cannot be read, the rest of the job is not bought and the status box says why. Items priced only in metal are not affected.
 
 V0.7.121 changes:
 - Gray-out fix: an item that was checked while it was the highlighted "currently checking" item could leave its gray veil spreading over the whole page once the highlight moved on, graying every item except the one being checked. The veil is now always anchored to its own item.
