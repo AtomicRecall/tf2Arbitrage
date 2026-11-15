@@ -83,13 +83,23 @@ async function waitForTabComplete(id,timeout=20000){
   return false;
 }
 
+// Size and place of the scanner window: a smaller window in the bottom right
+// corner of the screen's usable area (so it stays out of the way, but is still
+// large enough for Steam and STN to treat its pages as visible). The position is
+// worked out from the screen size, so no coordinates have to be configured.
 function automationWindowSize(){
   const availableWidth=Number(globalThis.screen?.availWidth)||0;
   const availableHeight=Number(globalThis.screen?.availHeight)||0;
-  return {
-    width:Math.max(700,Math.min(1100,availableWidth?Math.floor(availableWidth*0.7):1100)),
-    height:Math.max(600,Math.min(800,availableHeight?Math.floor(availableHeight*0.8):800))
-  };
+  const width=Math.max(700,Math.min(1000,availableWidth?Math.floor(availableWidth*0.5):1000));
+  const height=Math.max(600,Math.min(800,availableHeight?Math.floor(availableHeight*0.65):800));
+  const size={width,height};
+  if(availableWidth&&availableHeight){
+    const originLeft=Number(globalThis.screen?.availLeft)||0;
+    const originTop=Number(globalThis.screen?.availTop)||0;
+    size.left=Math.max(originLeft,originLeft+availableWidth-width);
+    size.top=Math.max(originTop,originTop+availableHeight-height);
+  }
+  return size;
 }
 
 async function getWindowIfOpen(id){
@@ -2806,9 +2816,39 @@ function reportSavedCheckSummary(){
   emitTradeAutomationStatus(`Saved items checked: ${good} still Good Trade${good===1?"":"s"}, ${gone} no longer good (removed from the list), ${unverified} unverified (kept), ${failed} could not be checked and stay saved${details?` (${details})`:""}.`);
 }
 
-async function refreshItemFromScrap(item){
+// scrap.tf draws its list in pieces, so the first read of a freshly opened page can
+// hold only part of it. The list is read until its length stops changing.
+async function readScrapPageWhenComplete(tabId,timeoutMs=30000){
+  const deadline=Date.now()+timeoutMs;
+  let lastCount=-1,stableSince=0,latest=null;
+  while(running&&Date.now()<deadline){
+    let page=null;
+    try{page=await msgTab(tabId,{type:"READ_BUY_PAGE"})}catch(error){page=null}
+    const count=Array.isArray(page?.items)?page.items.length:0;
+    if(count>0){
+      latest=page.items;
+      if(count===lastCount){
+        if(!stableSince)stableSince=Date.now();
+        if(Date.now()-stableSince>=2500)return latest;
+      }else{
+        lastCount=count;
+        stableSince=0;
+      }
+    }
+    await sleep(1000);
+  }
+  return latest;
+}
+
+// A saved scrap.tf item is looked up in the Buy Hats list. The list is read once
+// and reused for a few minutes; an item missing from a list that is more than a
+// minute old makes the page load again before the item is called "not listed".
+const SCRAP_LIST_REUSE_MS=5*60000;
+const SCRAP_LIST_TRUST_MS=60000;
+async function refreshItemFromScrap(item,forceReload=false){
   const target=TF2CheckedItems.keyFor(item.name);
-  let items=scrapPageCache&&Date.now()-scrapPageCache.at<5*60000?scrapPageCache.items:null;
+  let items=!forceReload&&scrapPageCache&&Date.now()-scrapPageCache.at<SCRAP_LIST_REUSE_MS?scrapPageCache.items:null;
+  const usedCache=Boolean(items);
   if(!items){
     let tab=null;
     try{
@@ -2820,15 +2860,11 @@ async function refreshItemFromScrap(item){
       if(!running)return {ok:false,reason:"Stopped."};
       if(!loaded)return {ok:false,reason:"The scrap.tf Buy Hats page did not finish loading."};
       await ensureScanTabVisible(tab.id,6000);
-      const deadline=Date.now()+25000;
-      while(running&&Date.now()<deadline){
-        let page=null;
-        try{page=await msgTab(tab.id,{type:"READ_BUY_PAGE"})}catch(error){page=null}
-        if(page?.items?.length){items=page.items;break}
-        await sleep(1000);
-      }
+      items=await readScrapPageWhenComplete(tab.id);
+      if(!running)return {ok:false,reason:"Stopped."};
       if(!items)return {ok:false,reason:"Could not read the scrap.tf Buy Hats page (are you signed in to scrap.tf?)."};
       scrapPageCache={at:Date.now(),items};
+      emitTradeAutomationStatus(`Read the scrap.tf Buy Hats page: ${items.length} hat${items.length===1?"":"s"} listed.`);
     }catch(error){
       return {ok:false,reason:`Could not open the scrap.tf Buy Hats page: ${error?.message||error}`};
     }finally{
@@ -2839,6 +2875,10 @@ async function refreshItemFromScrap(item){
     }
   }
   const found=items.find(entry=>entry.source==="scrap.tf"&&TF2CheckedItems.keyFor(entry.name)===target);
+  if(!found&&usedCache&&Date.now()-scrapPageCache.at>SCRAP_LIST_TRUST_MS){
+    // Not in an older list: read the page again before calling it not listed.
+    return refreshItemFromScrap(item,true);
+  }
   if(!found)return {ok:false,stock:0,reason:"scrap.tf does not list this item right now."};
   if(!(Number(found.stock)>0))return {ok:false,stock:0,reason:`scrap.tf has none in stock right now (${found.price}).`};
   return {ok:true,price:found.price,stock:found.stock,scrapValue:found.scrapValue,href:found.href||SCRAP_BUY_URL};

@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.125
+Current version 0.7.126
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,11 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.126 changes:
+- Check saved items, scrap.tf: the Buy Hats list is now read until its length stops changing (scrap.tf draws it in pieces, so the first read could hold only part of it, and that partial list was reused for the next 5 minutes, which made saved items look "not listed on scrap.tf" without being checked). A hat missing from a list that is more than a minute old makes the page load again before it is called not listed. The status box shows how many hats the page held.
+- The scanner window opens smaller (about half the screen wide) in the bottom right corner of the screen's usable area; the position comes from the screen size, no coordinates to set.
+- browserShell: "TF2 Trader.command" (and the app built by make_app.sh, which now runs it) closes its Terminal window once the launcher has stopped Firefox and the server and exited cleanly. After an error the window stays open.
 
 V0.7.125 changes:
 - Check saved items (and every other scan) no longer ends silently when something unexpected goes wrong while one item is checked: that item gets a "Check failed: ..." result with the error, and the scan carries on with the next item (five failures in a row stop it, with a message). Failed checks are never remembered as checked.

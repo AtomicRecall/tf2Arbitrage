@@ -5,7 +5,8 @@
 #   chmod +x browserShell/make_app.sh
 #   browserShell/make_app.sh
 #
-# The app opens a Terminal window that runs browserShell/launch.py, so the
+# The app opens a Terminal window that runs browserShell/TF2 Trader.command (which
+# runs browserShell/launch.py and closes the window when it has finished), so the
 # clicks use Terminal's Accessibility / Input Monitoring permissions (the ones
 # you already granted) and the server's output stays visible. It points at this
 # project folder, so re-run this script if you move the folder.
@@ -17,7 +18,7 @@ rm -rf "$APP"
 osacompile -o "$APP" \
   -e 'tell application "Terminal"' \
   -e 'activate' \
-  -e "do script \"export PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH; cd '$ROOT' && python3 browserShell/launch.py\"" \
+  -e "do script \"bash '$ROOT/browserShell/TF2 Trader.command'\"" \
   -e 'end tell'
 echo "Created: $APP"
 echo "The first time you open it, macOS asks whether it may control Terminal: allow it."
