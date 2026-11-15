@@ -15,7 +15,8 @@
     {name:"BuzzyBee 🌻🐝",steamId:"76561199389459475"},
     {name:"TEAM FORTRESS 2 ITEMS", steamId:"76561199119559575"},
     {name:"Infinite1808 Bot 24/7", steamId:"76561198776643746"},
-    {name:"Remzi", steamId:"76561198171418903"}
+    {name:"Remzi", steamId:"76561198171418903"},
+    {name:"SmallB",steamId:"76561198128703648"}
   ]);
 
   const STEAM64_BASE=BigInt("76561197960265728");

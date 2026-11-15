@@ -30,7 +30,7 @@ import time
 
 # Pointer positions measured with `cliclick p`.
 TRADE_OFFER = (1308, 578)
-CONFIRM_BUTTON = (1323, 928)
+CONFIRM_BUTTON = (1315, 911)
 
 # When the connection has timed out, the Steam app shows a retry button here.
 # It is clicked once at the start of every run, before anything else, and is
@@ -60,8 +60,8 @@ REFRESH_TAPS = []
 REFRESH_Y_OFFSET = 0
 
 # Mouse-wheel refresh: this many wheel events of this many lines each.
-WHEEL_EVENTS = 60
-WHEEL_LINES = 10
+WHEEL_EVENTS = 50
+WHEEL_LINES = 7
 
 # iPhone Mirroring lags, so a single click is sometimes not registered. Every
 # click is sent twice, this many milliseconds apart (0 = a single click).
@@ -295,7 +295,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
     for number in range(1, count + 1):
         print(f"Trade {number}/{count}")
         click_checked(clicker, TRADE_OFFER, "the trade offer", check_focus, spread)
-        pause(5.0, 8.0, "for the offer to open")
+        pause(8.0, 10.0, "for the offer to open")
         click_checked(clicker, CONFIRM_BUTTON, "the confirm button", check_focus, spread)
         if number < count:
             # Steam goes back to the list and refreshes it by itself.
