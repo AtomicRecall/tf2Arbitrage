@@ -46,10 +46,12 @@
     if(name&&prefix&&!name.toLowerCase().startsWith(prefix.toLowerCase()+" "))name=prefix+" "+name;
     return name;
   }
-  function readScrapTfPage(){
+  // `visibleOnly` leaves out the tiles the page's search box has filtered away.
+  function readScrapTfPage(visibleOnly=false){
     const nodes=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
     const cheapest=new Map();
     for(const node of nodes){
+      if(visibleOnly&&!scrapShown(node))continue;
       // Unusuals need their effect to be found on Backpack.tf and scrap.tf does
       // not name it, so they cannot be compared.
       if(scrapItemQuality(node)===5)continue;
@@ -113,14 +115,36 @@
   function scrapSearchText(name){
     return String(name||"").replace(/^(?:Genuine|Vintage|Haunted|Collector's)\s+/i,"").trim();
   }
+  // Puts `text` in the box and fires the events a typed key would: keydown, the
+  // input event, keyup (with the key's code, which some page handlers read) and
+  // change.
   function scrapSetSearch(input,text){
+    const last=text.slice(-1);
+    const code=last?last.toUpperCase().charCodeAt(0):8;
+    const keyInit={bubbles:true,cancelable:true,key:last||"Backspace",keyCode:code,which:code};
+    input.dispatchEvent(new KeyboardEvent("keydown",keyInit));
     const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
     if(setter)setter.call(input,text);else input.value=text;
     input.dispatchEvent(new Event("input",{bubbles:true}));
-    input.dispatchEvent(new KeyboardEvent("keyup",{bubbles:true,key:text.slice(-1)||"Backspace"}));
+    input.dispatchEvent(new KeyboardEvent("keyup",keyInit));
     input.dispatchEvent(new Event("change",{bubbles:true}));
   }
+  // The same, but through the browser's own text insertion (as if pasted), which
+  // fires the real input events. Used when the page did not react to the first way.
+  function scrapTypeSearch(input,text){
+    try{
+      input.focus();
+      input.select();
+      return document.execCommand("insertText",false,text);
+    }catch(error){return false}
+  }
+  // The page's filter has reacted when it hides some tiles of its long list.
+  function scrapFilterApplied(){
+    const tiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
+    return tiles.length<5||tiles.some(node=>!scrapShown(node));
+  }
   // Types the item's name into the search box and waits until the list shows it.
+  // `applied` says whether the page's filter reacted (hid other tiles).
   async function scrapSearch(name){
     const input=scrapSearchInput();
     if(!input)return {used:false};
@@ -132,6 +156,12 @@
     if(input.value!==text){
       try{input.focus()}catch(error){}
       scrapSetSearch(input,text);
+      await scrapSleep(500);
+      if(!scrapFilterApplied()){
+        // The page ignored the events: type it in through the browser instead.
+        scrapTypeSearch(input,text);
+        await scrapSleep(500);
+      }
     }
     const deadline=Date.now()+4000;
     let found=false;
@@ -141,7 +171,7 @@
     }
     // Let the filter finish hiding the other items before anything is clicked.
     if(found)await scrapSleep(400);
-    return {used:true,found};
+    return {used:true,found,applied:scrapFilterApplied(),boxText:input.value};
   }
   function scrapClearSearch(){
     const input=scrapSearchInput();
@@ -167,6 +197,30 @@
     }
     console.warn("TF2 Arbitrage: the scrap.tf search box or item list was not restored after the purchase attempt.");
     return false;
+  }
+
+  // One lookup of "Check saved items": the hat's name replaces whatever is in the
+  // page's search box, the page filters its list, and what is left showing is the
+  // answer. The tab stays open, so the next item only swaps the text.
+  async function scrapLookup(name){
+    const tiles=document.querySelectorAll("#buy-container .banking-category .item[data-item-value]");
+    if(!tiles.length)return {status:"not-ready"};
+    const target=normalizeName(name);
+    const matches=entry=>normalizeName(entry.name)===target;
+    let search=await scrapSearch(name);
+    let entry=(search.used?readScrapTfPage(true):readScrapTfPage()).find(matches)||null;
+    if(!entry&&search.used){
+      // Empty the box and type the name again before calling it missing.
+      scrapClearSearch();
+      await scrapSleep(600);
+      search=await scrapSearch(name);
+      entry=readScrapTfPage(true).find(matches)||null;
+    }
+    return {
+      status:"ok",found:Boolean(entry),entry,
+      searchUsed:search.used,filterApplied:search.used?Boolean(search.applied):null,
+      searchText:scrapSearchText(name),boxText:search.boxText??"",totalTiles:tiles.length
+    };
   }
 
   // The search text never stays behind: it is cleared however the attempt ends
@@ -1863,6 +1917,13 @@
       scrapBuy(msg.name,msg.quantity,msg.maxScrapValue)
         .then(sendResponse)
         .catch(error=>sendResponse({ok:false,reason:error.message||String(error)}));
+      return true;
+    }
+    if(msg.type==="SCRAP_LOOKUP"){
+      if(!isScrapTf()){sendResponse({status:"error",reason:"This is not a scrap.tf page."});return}
+      scrapLookup(msg.name)
+        .then(sendResponse)
+        .catch(error=>sendResponse({status:"error",reason:error.message||String(error)}));
       return true;
     }
     if(msg.type==="SCRAP_QUEUE_STATE"){

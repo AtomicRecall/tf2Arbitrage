@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.126
+Current version 0.7.128
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,12 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.128 changes:
+- scrap.tf search box: typing a name now fires the whole key sequence (keydown, input, keyup with the key code, change) instead of only input/keyup without a key code. If the page's list does not react (no tile gets hidden), the name is typed in a second way, through the browser's own text insertion. The status box reports, for every scrap.tf lookup, what the box now shows and whether the page's filter reacted; a lookup that finds nothing says when the filter did not react.
+
+V0.7.127 changes:
+- Check saved items, scrap.tf: the check no longer reads the page's whole list once and reuses it. It opens ONE scrap.tf Buy Hats tab and keeps it open for the whole check; every saved scrap.tf item is looked up by typing its name into the page's own search box (replacing the previous item's text), and the tiles that stay visible are the answer. A hat is only called "not listed" after the name was typed in twice. The status box says what was searched and how many hats the page holds. If the tab breaks, a new scrap.tf tab is opened and the item is looked up again. The tab closes when the check ends or is stopped.
 
 V0.7.126 changes:
 - Check saved items, scrap.tf: the Buy Hats list is now read until its length stops changing (scrap.tf draws it in pieces, so the first read could hold only part of it, and that partial list was reused for the next 5 minutes, which made saved items look "not listed on scrap.tf" without being checked). A hat missing from a list that is more than a minute old makes the page load again before it is called not listed. The status box shows how many hats the page held.
