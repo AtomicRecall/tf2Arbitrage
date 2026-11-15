@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.129
+Current version 0.7.131
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,12 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.131 changes:
+- The check before a trade (does the trader already hold the item?) is quicker: the Steam offer tab is polled every 250 ms instead of every second until it has loaded, the content-script retry waits 120 ms instead of 300 ms, and (in TF2 Metal Trader 0.9.126) the inventory search is believed sooner and the re-count and page-turn pauses are shorter. The load time limits (30 s) are unchanged.
+
+V0.7.130 changes:
+- scrap.tf's search box is no longer touched at all, by the saved-items check or by purchases. Typing a hat into it made the page filter its list down so far that every other scrap.tf offer looked like it had no items. Purchases now find the hat's tiles in the page's full list and click them directly, as before the search box was used; there is no search text to clear afterwards.
 
 V0.7.129 changes:
 - Check saved items, scrap.tf: all saved scrap.tf items are now answered from ONE read of the scrap.tf Buy Hats page. One tab is opened, the list is read until its length stops changing, the tab is closed, and each saved scrap.tf item is looked up in that list (in stock / out of stock / not listed). There is no tab, search typing or waiting per item any more, and an item the list already rules out is not delayed by the pause between items. Items that are still for sale go on to the Backpack.tf check as before. The list is read again only if it is more than 10 minutes old. The status box reports how many hats the one read held. The per-item search-box lookup of v0.7.127/128 was removed; the search box typing is still used when the bot buys on scrap.tf. The popup's texts describe this.

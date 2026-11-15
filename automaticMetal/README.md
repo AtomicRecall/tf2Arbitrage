@@ -1,6 +1,10 @@
-# TF2 Metal Trader v0.9.125
+# TF2 Metal Trader v0.9.126
 
 Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam trade offers.
+
+## v0.9.126 — quicker "already holds this item" check
+
+- The trader's "already holds this item" count waits less for Steam's search to settle (a result is believed after 0.45 s instead of 0.75 s, an empty one after 1.0 s instead of 1.5 s), re-counts after 0.3 s instead of 0.6 s and turns pages after 0.3 s instead of 0.45 s. Everything else keeps the old waits.
 
 ## v0.9.125 — the trader metal check combines refined, reclaimed and scrap
 

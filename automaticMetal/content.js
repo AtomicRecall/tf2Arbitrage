@@ -865,7 +865,12 @@
     });
   }
 
-  async function waitForSearchToSettle(query, side = null, expectedImageUrl = "", timeoutMs = 15000, minimumSettleMs = 750) {
+  // How long a finished search must have been stable before it is believed. The
+  // trader's "already holds this item" check uses SHORT_SETTLE, which waits less.
+  const NORMAL_SETTLE = { itemMs: 750, itemStableMs: 400, emptyMs: 1500, emptyStableMs: 750, recountMs: 600, pageMs: 450 };
+  const SHORT_SETTLE = { itemMs: 450, itemStableMs: 250, emptyMs: 1000, emptyStableMs: 400, recountMs: 300, pageMs: 300 };
+
+  async function waitForSearchToSettle(query, side = null, expectedImageUrl = "", timeoutMs = 15000, minimumSettleMs = 750, settle = NORMAL_SETTLE) {
     let deadline = Date.now() + timeoutMs;
     let searchStartedAt = Date.now();
     let previousPage = null;
@@ -930,13 +935,13 @@
         ) {
           return;
         }
-        if (query && visibleItems.length && searchAge >= 750 && stableFor >= 400) return;
+        if (query && visibleItems.length && searchAge >= settle.itemMs && stableFor >= settle.itemStableMs) return;
         if (
           query &&
           isEmpty &&
-          searchAge >= 1500 &&
+          searchAge >= settle.emptyMs &&
           emptyStateStableSince !== null &&
-          now - emptyStateStableSince >= 750
+          now - emptyStateStableSince >= settle.emptyStableMs
         ) {
           return;
         }
@@ -1301,7 +1306,7 @@
 
     await ensureInventorySideReady("their");
     await setSteamInventorySearch(check.itemName);
-    await waitForSearchToSettle(check.itemName, "their");
+    await waitForSearchToSettle(check.itemName, "their", "", 15000, 750, SHORT_SETTLE);
 
     const owned = new Set();
     let scanned = 0;
@@ -1311,7 +1316,7 @@
       let page = await countSteamInventoryItems("their", check.itemName, check.quality);
       if (page.scanned === 0 && pagesRead === 0) {
         // Steam may still be laying out the search results.
-        await sleep(600);
+        await sleep(SHORT_SETTLE.recountMs);
         page = await countSteamInventoryItems("their", check.itemName, check.quality);
       }
       scanned += page.scanned;
@@ -1322,7 +1327,7 @@
       const nextButton = document.querySelector("#pagebtn_next");
       if (!nextButton || nextButton.classList.contains("disabled") || !isSteamInventoryDisplayed(nextButton)) break;
       nextButton.click();
-      await sleep(450);
+      await sleep(SHORT_SETTLE.pageMs);
     }
     return { count: owned.size, scanned, pagesRead: pagesRead + 1, filters };
   }

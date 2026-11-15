@@ -2022,7 +2022,8 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null){
     ownedTabIds.add(tab.id);
     ownedTabUrls.set(tab.id,url.href);
 
-    const loaded=await waitForTabComplete(tab.id,30000);
+    // Polled every 250 ms (not 1 s) so the check starts as soon as Steam is done.
+    const loaded=await waitForTabComplete(tab.id,30000,250);
     if(!loaded)throw new Error(running?"Steam offer page did not finish loading.":"Offer check stopped with the scan.");
 
     if(!running)return {status:"unverified",url:url.href,reason:"Offer checking stopped with the scan."};
@@ -2033,7 +2034,7 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null){
     const messageDeadline=Date.now()+15000;
     while(running&&Date.now()<messageDeadline&&!response){
       try{response=await msgTab(tab.id,message)}
-      catch(error){await sleep(300)}
+      catch(error){await sleep(120)}
     }
     if(!response){
       return {
@@ -3177,7 +3178,7 @@ function analyze(item,data){
   };
 }
 
-async function waitForTabComplete(tabId,timeout=PAGE_SETTLE_TIMEOUT){
+async function waitForTabComplete(tabId,timeout=PAGE_SETTLE_TIMEOUT,pollMs=LISTING_POLL_MS){
   const start=Date.now();
   while(running&&Date.now()-start<timeout){
     try{
@@ -3185,7 +3186,7 @@ async function waitForTabComplete(tabId,timeout=PAGE_SETTLE_TIMEOUT){
       const tab=tabs.find(t=>t.id===tabId);
       if(tab&&tab.status==="complete")return true;
     }catch(e){}
-    await sleep(LISTING_POLL_MS);
+    await sleep(pollMs);
   }
   return false;
 }

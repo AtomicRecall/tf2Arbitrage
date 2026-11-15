@@ -101,130 +101,18 @@
   }
   function scrapSelectedCount(){return scrapSelection().reduce((sum,entry)=>sum+entry.count,0)}
 
-  // The page's own search box ("Search for items", input.inventory-search) filters
-  // the item list the way a person would look for one hat. The page has one for
-  // the user's backpack (#sell-container) and one for the shop; the shop's is used.
-  function scrapSearchInput(){
-    const inputs=[...document.querySelectorAll("input.inventory-search")];
-    return inputs.find(input=>!input.closest("#sell-container"))||null;
-  }
-  // The text typed is the item's name without the quality word that readScrapTfPage
-  // adds (scrap.tf titles do not carry "Genuine", "Vintage", ...).
-  function scrapSearchText(name){
-    return String(name||"").replace(/^(?:Genuine|Vintage|Haunted|Collector's)\s+/i,"").trim();
-  }
-  // Puts `text` in the box and fires the events a typed key would: keydown, the
-  // input event, keyup (with the key's code, which some page handlers read) and
-  // change.
-  function scrapSetSearch(input,text){
-    const last=text.slice(-1);
-    const code=last?last.toUpperCase().charCodeAt(0):8;
-    const keyInit={bubbles:true,cancelable:true,key:last||"Backspace",keyCode:code,which:code};
-    input.dispatchEvent(new KeyboardEvent("keydown",keyInit));
-    const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
-    if(setter)setter.call(input,text);else input.value=text;
-    input.dispatchEvent(new Event("input",{bubbles:true}));
-    input.dispatchEvent(new KeyboardEvent("keyup",keyInit));
-    input.dispatchEvent(new Event("change",{bubbles:true}));
-  }
-  // The same, but through the browser's own text insertion (as if pasted), which
-  // fires the real input events. Used when the page did not react to the first way.
-  function scrapTypeSearch(input,text){
-    try{
-      input.focus();
-      input.select();
-      return document.execCommand("insertText",false,text);
-    }catch(error){return false}
-  }
-  // The page's filter has reacted when it hides some tiles of its long list.
-  function scrapFilterApplied(){
-    const tiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
-    return tiles.length<5||tiles.some(node=>!scrapShown(node));
-  }
-  // Types the item's name into the search box and waits until the list shows it.
-  // `applied` says whether the page's filter reacted (hid other tiles).
-  async function scrapSearch(name){
-    const input=scrapSearchInput();
-    if(!input)return {used:false};
-    const text=scrapSearchText(name);
-    if(!text)return {used:false};
-    const target=normalizeName(name);
-    const matching=()=>[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")]
-      .filter(node=>normalizeName(scrapItemName(node))===target);
-    if(input.value!==text){
-      try{input.focus()}catch(error){}
-      scrapSetSearch(input,text);
-      await scrapSleep(500);
-      if(!scrapFilterApplied()){
-        // The page ignored the events: type it in through the browser instead.
-        scrapTypeSearch(input,text);
-        await scrapSleep(500);
-      }
-    }
-    const deadline=Date.now()+4000;
-    let found=false;
-    while(Date.now()<deadline){
-      await scrapSleep(250);
-      if(matching().some(scrapShown)){found=true;break}
-    }
-    // Let the filter finish hiding the other items before anything is clicked.
-    if(found)await scrapSleep(400);
-    return {used:true,found,applied:scrapFilterApplied(),boxText:input.value};
-  }
-  function scrapClearSearch(){
-    const input=scrapSearchInput();
-    if(!input||!input.value)return;
-    scrapSetSearch(input,"");
-    // A page script can put the text back or ignore the events; set it directly.
-    if(input.value)input.value="";
-  }
-  function scrapCountShown(){
-    return [...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")].filter(scrapShown).length;
-  }
-  // Empties the search box and waits until the list shows as many items as it did
-  // before the search (the filter is lifted), trying the clear a second time.
-  async function scrapRestoreSearch(shownBefore){
-    for(let attempt=0;attempt<2;attempt++){
-      scrapClearSearch();
-      const deadline=Date.now()+1500;
-      while(Date.now()<deadline){
-        const input=scrapSearchInput();
-        if((!input||!input.value)&&scrapCountShown()>=shownBefore)return true;
-        await scrapSleep(150);
-      }
-    }
-    console.warn("TF2 Arbitrage: the scrap.tf search box or item list was not restored after the purchase attempt.");
-    return false;
-  }
-
-  // The search text never stays behind: it is cleared however the attempt ends
-  // (item bought, price rose, nothing selectable, checkout unavailable, error).
+  // The page's own search box is never touched: typing into it made the page's
+  // list look empty. The item's tiles are found in the list itself.
   async function scrapBuy(name,quantity,maxScrapValue){
-    const shownBefore=scrapCountShown();
-    try{
-      return await scrapBuyWithSearch(name,quantity,maxScrapValue);
-    }finally{
-      await scrapRestoreSearch(shownBefore);
-    }
-  }
-
-  async function scrapBuyWithSearch(name,quantity,maxScrapValue){
     const wanted=Math.max(1,Math.floor(Number(quantity))||1);
     const target=normalizeName(name);
     const allTiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")];
     if(!allTiles.length){
       return {ok:false,status:"not-ready",reason:"The scrap.tf item list is not on the page (still loading, or you are not signed in to scrap.tf)."};
     }
-    // Filter the shop to this hat with the page's search box first.
-    const search=await scrapSearch(name);
-    let tiles=[...document.querySelectorAll("#buy-container .banking-category .item[data-item-value]")]
+    let tiles=allTiles
       .filter(node=>normalizeName(scrapItemName(node))===target)
       .sort((a,b)=>Number(a.getAttribute("data-item-value"))-Number(b.getAttribute("data-item-value")));
-    if(search.used){
-      // After the search, the copies it left showing are the ones to click.
-      const showing=tiles.filter(scrapShown);
-      if(showing.length)tiles=showing;
-    }
     if(!tiles.length){
       return {ok:false,reason:`${name} is no longer listed on scrap.tf.`};
     }
