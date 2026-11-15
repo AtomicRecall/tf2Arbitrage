@@ -7,7 +7,7 @@ const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeV
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
-const scanReverse=$("scanReverse"),tabReverse=$("tabReverse");
+const scanOffline=$("scanOffline"),scanReverse=$("scanReverse"),tabReverse=$("tabReverse");
 const scanStn=$("scanStn"),scanScrap=$("scanScrap");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
@@ -588,6 +588,7 @@ volume.oninput=()=>{
 scan.onclick=()=>startScan("START_SCAN",{sites:"all"});
 scanStn.onclick=()=>startScan("START_SCAN",{sites:"stn"});
 scanScrap.onclick=()=>startScan("START_SCAN",{sites:"scrap.tf"});
+scanOffline.onclick=()=>clickFeedback(scanOffline,startScan("START_SCAN",{sites:"all",offline:true}));
 // Click feedback done in the popup itself: a pulse ring right after the click and, while the
 // request is being answered, a light sweep across the button.
 function clickFeedback(button,work){

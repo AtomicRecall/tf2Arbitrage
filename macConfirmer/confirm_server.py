@@ -77,8 +77,9 @@ def log(message):
 # phone is locked and not in use. Before a run the server looks at the colour of one
 # spot of the mirroring window (see phone_state.py): when it shows the Steam
 # confirmations page (the phone is ready) it just goes on, otherwise it sends a push notification (through ntfy, https://ntfy.sh) so you can
-# put the phone down, and when the run is over it sends another one saying the
-# phone is free again. Without a calibration it always sends the first one. The
+# put the phone down; the run then does the three connection retry clicks and looks at the spot again,
+# repeating that until the confirmations page shows. When the run is over it sends another
+# notification saying the phone is free again. Without a calibration it always sends the first one. The
 # message is generic: no item, offer or account information is sent. The topic is a
 # random name created on first start and kept in server_config.json (it is the only
 # "password" of the channel, so keep it private); subscribe to it in the ntfy app.
@@ -151,11 +152,10 @@ class Confirmer:
     """Owns the queue and the single worker that performs the clicks."""
 
     def __init__(self, dry_run, min_delay, max_delay, max_per_hour, notifier=None, notify_lead=0.0,
-                 phone=None, phone_wait=120.0):
+                 phone=None):
         self.notifier = notifier or Notifier(None, "")
         self.notify_lead = max(0.0, notify_lead)
         self.phone = phone  # phone_state.PhoneCheck, or None when no spot was saved
-        self.phone_wait = max(0.0, phone_wait)
         self.phone_taken = False  # the phone was asked for and has not been given back yet
         self.dry_run = dry_run
         self.min_delay, self.max_delay = min_delay, max_delay
@@ -258,38 +258,32 @@ class Confirmer:
         log(f"Phone check: {'ready (on the confirmations page)' if state == 'free' else 'NOT ready'} ({details}).")
         return state
 
-    def _ask_for_phone(self, count):
-        """Makes sure the phone is not in use before the Mac takes it over.
-        Returns True only when the very first look found the phone on the confirmations page
-        (the connection retry clicks are then not needed). Any "not ready" first look, even one
-        that turns ready while waiting, returns False: the retry clicks are done."""
+    def _page_ready(self):
+        """True (the phone shows the confirmations page), False (it does not) or None (it cannot be
+        told: no spot saved, or the screen could not be read)."""
         state = self._phone_state()
         if state == "free":
-            log("The phone is already on the confirmations page: no notification needed.")
             return True
+        return False if state == "busy" else None
+
+    def _ask_for_phone(self, count):
+        """Makes sure the phone is not in use before the Mac takes it over: when the phone is already
+        on the confirmations page nothing is sent; otherwise the "lock your iPhone" notification goes
+        out and the Mac waits for you to lock it. The retry clicks and the checks that repeat them
+        until the page shows are done by confirm_trades.run."""
+        if self._phone_state() == "free":
+            log("The phone is already on the confirmations page: no notification needed.")
+            return
         sent = self.notifier.send(
             "Lock your iPhone",
             f"{count} trade{'s' if count != 1 else ''} to confirm. Put your phone down and lock it now: "
             f"the Mac takes it over in {int(self.notify_lead)} seconds.",
         )
         if not sent:
-            return False
+            return
         self.phone_taken = True
-        if state != "busy":
-            log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
-            time.sleep(self.notify_lead)
-            return False
-        # The spot does not show the confirmations page: go on as soon as it does.
-        log(f"Sent the phone notification; waiting up to {self.phone_wait:.0f}s for the confirmations page to show.")
-        deadline = time.time() + self.phone_wait
-        while time.time() < deadline:
-            time.sleep(2.0)
-            if self._phone_state() == "free":
-                time.sleep(1.5)
-                # The first look said "not ready", so the connection retry clicks are still done.
-                return False
-        log("The confirmations page did not show up in time; trying anyway.")
-        return False
+        log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
+        time.sleep(self.notify_lead)
 
     def _give_phone_back(self, text):
         """Tells you the phone is free again, once nothing more is waiting for it."""
@@ -305,13 +299,15 @@ class Confirmer:
             count, ids = self._next_batch()
             try:
                 # The phone has to be locked and unused while the Mac clicks on it.
-                on_page = False
                 if not self.dry_run and (self.notifier.enabled or self.phone):
-                    on_page = self._ask_for_phone(count)
+                    self._ask_for_phone(count)
                 delay = random.uniform(self.min_delay, self.max_delay)
                 log(f"Accepting {count} trade{'s' if count != 1 else ''} in {delay:.1f}s…")
                 time.sleep(delay)
-                confirm_trades.run(count, self.dry_run, True, 0, 5, "wheel", False, skip_retry=on_page)
+                # With a saved spot the run checks the phone, does the three retry clicks when it is not
+                # on the confirmations page, checks again, and repeats that until it is.
+                confirm_trades.run(count, self.dry_run, True, 0, 5, "wheel", False,
+                                   page_ready=self._page_ready if (self.phone and not self.dry_run) else None)
                 with self.cond:
                     self.active_ids.difference_update(ids)
                     self.done_ids.update(ids)
@@ -447,8 +443,9 @@ def main():
                         help=f"with --pick-phone-spot / --phone-spot: how far each of R, G and B may differ (default {phone_state.TOLERANCE})")
     parser.add_argument("--check-phone", action="store_true", help="look at the saved spot now, print what it shows and exit")
     parser.add_argument("--no-phone-check", action="store_true", help="always send the 'lock your iPhone' notification, without looking at the spot")
-    parser.add_argument("--phone-wait", type=float, default=120.0,
-                        help="when the spot does not show the confirmations page, wait at most this many seconds for it to (default %(default)s)")
+    parser.add_argument("--retry-rounds", type=int, default=confirm_trades.MAX_RETRY_ROUNDS,
+                        help="with a saved phone spot: at most this many rounds of the three retry clicks, each followed by a "
+                             "check, before the run fails and the server pauses (default %(default)s)")
     parser.add_argument("--wheel-events", type=int, default=confirm_trades.WHEEL_EVENTS)
     parser.add_argument("--wheel-lines", type=int, default=confirm_trades.WHEEL_LINES)
     parser.add_argument("--refresh-y-offset", type=int, default=confirm_trades.REFRESH_Y_OFFSET)
@@ -462,6 +459,7 @@ def main():
     confirm_trades.WHEEL_LINES = args.wheel_lines
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
     confirm_trades.CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
+    confirm_trades.MAX_RETRY_ROUNDS = max(1, args.retry_rounds)
 
     if args.pick_phone_spot or args.phone_spot or args.check_phone:
         try:
@@ -504,7 +502,7 @@ def main():
     allowed = {ipaddress.ip_address(item) for item in args.allow}
     phone = None if args.no_phone_check else phone_state.PhoneCheck.from_config()
     confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour, notifier, args.notify_lead,
-                          phone, args.phone_wait)
+                          phone)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(confirmer, token, allowed))
     log(f"Listening on {args.host}:{args.port}{' (DRY RUN: no clicks)' if args.dry_run else ''}")
     log(f"Token: {token}")

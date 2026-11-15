@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.135
+Current version 0.7.136
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.136 changes:
+- New button "Scan offline (check only, save Good Trades, no trading)". It scans the STN and scrap.tf pages open in the window exactly like the normal scan, but only checks: every Good Trade is saved to the saved items, and nothing is bought and no offer is sent, whatever the automatic-trading checkbox says (the checkbox itself is not changed). The STN auto rescan keeps running offline too, until Stop.
+- Mac confirmer: the phone check is now a loop. Trade to accept -> check whether the phone is on the confirmations page -> if not, the three retry clicks (with their pauses) and the wait for the iPhone to reconnect -> check again -> if still not, the three clicks again, until the check says the phone is on the confirmations page. At most --retry-rounds rounds (default 10), then the run fails and the server pauses.
 
 V0.7.135 changes:
 - The Stop and Check saved items buttons play a click animation in the popup: a pulse ring right after the click, and a light sweep across the button while the request is being answered (turned off for people who prefer reduced motion).

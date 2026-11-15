@@ -44,6 +44,10 @@ THIRD_RETRY_BUTTON = (1321, 843)
 RETRY_CLICK_GAP_SECONDS = (0.5, 1.0)
 # How long to wait after that click: the iPhone takes a while to initialize.
 RETRY_WAIT_SECONDS = (9.0, 11.0)
+# When the phone can be checked (a spot was saved), the three retry clicks are repeated until the
+# check says the phone is on the confirmations page. This many rounds at most; then the run fails
+# (and the server pauses) instead of clicking for ever.
+MAX_RETRY_ROUNDS = 10
 
 # Taps that reload the confirmations list instead of a swipe, clicked in order.
 # For example: open another tab in the Steam app, then come back to Confirmations.
@@ -225,9 +229,48 @@ def refresh_list(clicker, mode, spread, invert_scroll, check_focus=True):
             pull_down_to_refresh(start[0], start[1], invert=invert_scroll)
 
 
-def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scroll, skip_retry=False):
+def retry_round(clicker, check_focus, spread):
+    """One round of the connection retry clicks (first, second and third button, with a small pause
+    between them), then the wait for the iPhone to reconnect."""
+    click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
+    if SECOND_RETRY_BUTTON:
+        pause(*RETRY_CLICK_GAP_SECONDS, "between the retry clicks")
+        click_checked(clicker, SECOND_RETRY_BUTTON, "the second retry button", check_focus, min(spread, 3), repeat=False)
+    if THIRD_RETRY_BUTTON:
+        pause(*RETRY_CLICK_GAP_SECONDS, "between the retry clicks")
+        click_checked(clicker, THIRD_RETRY_BUTTON, "the third retry button", check_focus, min(spread, 3), repeat=False)
+    pause(*RETRY_WAIT_SECONDS, "for the iPhone to reconnect after the retry button")
+
+
+def ensure_confirmations_page(clicker, check_focus, spread, page_ready, max_rounds=None):
+    """Check -> (not on the confirmations page) retry clicks -> check again -> ... until the check says
+    the phone is on the confirmations page. `page_ready()` returns True (on the page), False (not on
+    it) or None (it cannot be told: then one round of clicks is done and the run goes on)."""
+    max_rounds = MAX_RETRY_ROUNDS if max_rounds is None else max_rounds
+    rounds = 0
+    while True:
+        state = page_ready()
+        if state is True:
+            print("The phone is on the confirmations page." if not rounds else
+                  f"The phone is on the confirmations page after {rounds} round{'s' if rounds != 1 else ''} of retry clicks.")
+            return rounds
+        if not TIMEOUT_RETRY_BUTTON:
+            return rounds
+        if rounds >= max_rounds:
+            raise RuntimeError(f"The phone is still not on the confirmations page after {rounds} rounds of retry clicks.")
+        rounds += 1
+        print(f"The phone is {'not on the confirmations page' if state is False else 'in an unknown state'}: retry clicks, round {rounds}.")
+        retry_round(clicker, check_focus, spread)
+        if state is None:
+            return rounds  # nothing to check against, so one round is all that can be done
+
+
+def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scroll, skip_retry=False,
+        page_ready=None):
     """`skip_retry`: the phone is known to be on the confirmations page already, so the
-    connection retry buttons are not clicked."""
+    connection retry buttons are not clicked.
+    `page_ready`: a function telling whether the phone is on the confirmations page (see
+    ensure_confirmations_page); the retry clicks are then repeated until it says yes."""
     clicker = Clicker(dry_run)
 
     if not dry_run:
@@ -238,17 +281,12 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
 
     if skip_retry:
         print("The phone is already on the confirmations page: skipping the connection retry clicks.")
+    elif page_ready is not None:
+        ensure_confirmations_page(clicker, check_focus, spread, page_ready)
     elif TIMEOUT_RETRY_BUTTON:
-        # A timed-out connection leaves a retry button on screen; press it once
-        # (a single click, not the doubled one) before refreshing or accepting.
-        click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
-        if SECOND_RETRY_BUTTON:
-            pause(*RETRY_CLICK_GAP_SECONDS, "between the retry clicks")
-            click_checked(clicker, SECOND_RETRY_BUTTON, "the second retry button", check_focus, min(spread, 3), repeat=False)
-        if THIRD_RETRY_BUTTON:
-            pause(*RETRY_CLICK_GAP_SECONDS, "between the retry clicks")
-            click_checked(clicker, THIRD_RETRY_BUTTON, "the third retry button", check_focus, min(spread, 3), repeat=False)
-        pause(*RETRY_WAIT_SECONDS, "for the iPhone to reconnect after the retry button")
+        # A timed-out connection leaves a retry button on screen; press it (three buttons, a
+        # single click each, not the doubled one) before refreshing or accepting.
+        retry_round(clicker, check_focus, spread)
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
     if refresh_mode != "none":

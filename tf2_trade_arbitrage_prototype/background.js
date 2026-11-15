@@ -6,6 +6,9 @@ const ownedTabUrls=new Map();
 let notifiedDeals=new Set();
 const notificationTargets=new Map();
 let tradeAutomationEnabled=false;
+// An offline scan (its own popup button) only checks: Good Trades are saved, nothing is bought and no
+// offer is sent, whatever the automatic-trading setting is. The setting itself is left as it was.
+let offlineScan=false;
 let tradeAutomationQueue=[];
 let activeTradeJob=null;
 let tradeWorkerRunning=false;
@@ -1917,6 +1920,11 @@ function enqueueTradeJob(result,options={}){
   const skipPurchase=forceManual&&options.skipPurchase===true;
   const fromScrapTf=result?.source==="scrap.tf";
   const sellerLabel=fromScrapTf?"scrap.tf":"STN";
+  if(offlineScan&&!forceManual&&result?.deal){
+    const reason="Offline scan: the Good Trade was saved, but no trade is made.";
+    emitTradeAutomationStatus(`${result.name} is a Good Trade. ${reason}`);
+    return {ok:false,reason,offline:true};
+  }
   if((!tradeAutomationEnabled&&!forceManual)||!result?.deal){
     return {ok:false,reason:"Automatic trade execution is not enabled for this result."};
   }
@@ -3945,16 +3953,17 @@ function startItemScan(m,sendResponse){
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
-      if(typeof m.autoTradesEnabled==="boolean"){
+      offlineScan=m.offline===true;
+      if(!offlineScan&&typeof m.autoTradesEnabled==="boolean"){
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
       if(reverseByKey.size)sources["stn-reverse"]=reverseByKey.size;
-      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn,offline:offlineScan}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources,alreadyChecked:alreadyChecked.length});
       emitAlreadyChecked(alreadyChecked);
-      emitTradeAutomationStatus(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
+      emitTradeAutomationStatus(offlineScan?"Offline scan: items are only checked and Good Trades are saved. Nothing is bought and no offer is sent.":tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
     next();
   }).catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
 }
@@ -4010,7 +4019,7 @@ async function startAutoRescan(context){
   await sleep(2500);
   if(token!==autoRescanToken||!autoRescanContext||running)return;
   const origin=await getTabInfo(context.tabId);
-  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id},resolve));
+  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id,offline:context.offline===true},resolve));
   if(!result?.ok){
     autoRescanContext=null;
     emitTradeAutomationStatus(`The automatic rescan ended: ${result?.error||"the scan could not start."}`);
@@ -4028,7 +4037,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   if(m.type==="START_REVERSE_SCAN"){
     (async()=>{
       if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
-      autoRescanContext=null;autoRescanToken++;
+      autoRescanContext=null;autoRescanToken++;offlineScan=false;
       const tabs=await qTabs({active:true,currentWindow:true}).catch(()=>[]);
       const tab=tabs[0];
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
@@ -4083,7 +4092,8 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       sourceTabId=tabs[0]?.id??null;
       sourceWindowId=tabs[0]?.windowId??null;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
-      if(typeof m.autoTradesEnabled==="boolean"){
+      offlineScan=m.offline===true;
+      if(!offlineScan&&typeof m.autoTradesEnabled==="boolean"){
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
@@ -4101,7 +4111,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   }
   if(m.type==="STOP_SCAN"){
     running=false;queue=[];
-    autoRescanContext=null;autoRescanToken++;
+    autoRescanContext=null;autoRescanToken++;offlineScan=false;
     sourceTabId=null;
     closeCurrentTab()
       .then(()=>closeAllOwnedTabs())

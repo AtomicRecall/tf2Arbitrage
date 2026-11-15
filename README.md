@@ -114,7 +114,9 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
    the two sites are checked alternately. Every STN hat is checked **both ways**: buy on STN and sell
    on Backpack.tf, and buy on Backpack.tf and sell to STN (see the reverse scan below). scrap.tf hats are
    checked buying on scrap.tf. **Scan STN only** and **Scan scrap.tf only** run the same scan on just that
-   site's page(s). A separate **TF2 Arbitrage Scanner** window opens for the
+   site's page(s). **Scan offline** is the same scan as the first button, but it only checks: Good Trades
+   are saved (see *Saved Good Trades*), and nothing is bought and no offer is sent, whatever the
+   automatic-trading checkbox says. A separate **TF2 Arbitrage Scanner** window opens for the
    Backpack.tf and Steam pages and closes when the work is done. Keep it open and visible.
 3. Watch the result tabs:
 
@@ -237,11 +239,19 @@ account details. `--no-notify` switches it off, `--ntfy-topic` / `--ntfy-server`
 of the screen. With iPhone Mirroring showing the Steam confirmations page, that spot has a certain colour; you save
 it once. Before a run the server takes a tiny screenshot of the spot: if it has the saved colour, the phone is
 already on the confirmations page, so no "Lock your iPhone" message is sent and the clicks start. If it has another
-colour, the message is sent and the Mac starts as soon as the colour shows up (at most `--phone-wait`, 120 s). When
+colour, the message is sent and the Mac waits `--notify-lead` seconds for you to lock the phone. When
 the confirmations are done and nothing else is waiting, a second message, "You can use your phone", is sent (only if
-the first one was). When the spot shows the confirmations page, the run also skips the connection retry clicks
-(`TIMEOUT_RETRY_BUTTON`, `SECOND_RETRY_BUTTON` and `THIRD_RETRY_BUTTON`) and their 9-11 s wait, since the page is already there. Whenever the first check says "not ready" (even if the
-page shows up while waiting), or the check cannot run, the three retry clicks are done.
+the first one was).
+
+The phone check also drives the connection retry clicks. The loop for every batch of trades is:
+trade to accept -> check whether the phone is on the confirmations page -> if not, do the three retry clicks
+(`TIMEOUT_RETRY_BUTTON`, `SECOND_RETRY_BUTTON`, `THIRD_RETRY_BUTTON`, a short random pause between them) and wait
+9-11 s for the iPhone to reconnect -> check again -> if still not, do the three clicks again, and so on until the
+check says the phone is on the confirmations page; only then the list is refreshed and the trades are accepted.
+When the page is already showing at the first check, no retry click is made. At most `--retry-rounds` rounds
+(default 10) are done; after that the run fails, the server pauses and sends the "failed" notification instead of
+clicking for ever. Without a saved spot (or when the screen cannot be read) the check cannot be done, so the three
+retry clicks are made once per run.
 
 ```bash
 python3 macConfirmer/confirm_server.py --pick-phone-spot        # put the mouse on the spot within 5 s; the phone must show the confirmations page
