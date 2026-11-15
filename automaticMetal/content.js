@@ -985,7 +985,7 @@
       throw new Error("Cannot run a metal availability test because the trader side already contains items.");
     }
 
-    const targetScrap = Math.ceil(requiredRef * 9 - 0.0001);
+    let targetScrap = Math.ceil(requiredRef * 9 - 0.0001);
     const counts = { refined: 0, reclaimed: 0, scrap: 0 };
     const denominations = [
       ["refined", METAL_IMAGES.refined, 9],
@@ -996,6 +996,13 @@
     let addError = null;
     let badTrader = null;
     let ownedCheck = null;
+    // A price that includes keys is paid with the trader's own keys when they
+    // hold them: the metal needed is the price minus the value (at the key
+    // rate) of the keys the trader actually has, never the full metal value.
+    const keyParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const keysNeeded = Math.max(0, Number.parseInt(keyParams.get("tmt_keys") || "", 10) || 0);
+    const keyRateRef = Number(keyParams.get("tmt_key_rate"));
+    let keysUsed = 0;
 
     // The arbitrage controller passes the item and the number the trader wants
     // in the link fragment. Without them, only the metal is checked.
@@ -1068,6 +1075,21 @@
         console.log(`TF2 Metal Trader: after ${kind}, staged ${JSON.stringify(readStagedMetal())} = ${stagedScrap()} of ${targetScrap} scrap; ${Math.max(0, remaining)} still needed.`);
       };
 
+      if (!badTrader && keysNeeded > 0 && Number.isFinite(keyRateRef) && keyRateRef > 0) {
+        try {
+          statusCallback?.(`Counting the trader's ${KEY_NAME}s (the price includes ${keysNeeded})…`);
+          const heldKeys = await countAvailableCopies("their", KEY_NAME, keysNeeded);
+          keysUsed = Math.min(keysNeeded, heldKeys.size);
+        } catch (error) {
+          console.warn("TF2 Metal Trader: could not count the trader's keys; checking the full metal value.", error);
+        }
+        if (keysUsed > 0) {
+          targetScrap = Math.max(0, Math.ceil((requiredRef - keysUsed * keyRateRef) * 9 - 0.0001));
+          remaining = targetScrap;
+          statusCallback?.(`Trader holds ${keysUsed} of the ${keysNeeded} key${keysNeeded === 1 ? "" : "s"}; only ${(targetScrap / 9).toFixed(2)} ref of metal is needed.`);
+        }
+      }
+
       if (!badTrader) {
         // Pass 1 - exact fit, largest first: only whole denominations that fit
         // inside what is still needed, so nothing is over-staged.
@@ -1114,7 +1136,9 @@
       counts.refined * METAL_VALUES.refined +
       counts.reclaimed * METAL_VALUES.reclaimed +
       counts.scrap;
-    const availableRef = availableScrap / 9;
+    // The trader's keys count at the key rate, so the caller can compare the
+    // total against the full price.
+    const availableRef = availableScrap / 9 + keysUsed * (keysUsed > 0 ? keyRateRef : 0);
     if (badTrader) {
       return {
         status: "checked",
@@ -1137,6 +1161,8 @@
       counts,
       availableRef,
       requiredRef,
+      keysUsed,
+      keysNeeded,
       ownedCheck,
       sufficient: availableScrap >= targetScrap,
       items: counts.refined + counts.reclaimed + counts.scrap
@@ -1382,10 +1408,10 @@
     return found;
   }
 
-  // Decides whether a key price is paid with physical keys. The paying side
-  // must hold every key the price needs; otherwise the whole price is paid in
-  // metal (keys x key rate + the metal part). `stagedKeyIds` are keys already
-  // placed in the trade, which count as held.
+  // Decides how many of the price's keys are paid with physical keys: as many
+  // as the paying side holds, up to the price. Only the keys it lacks are paid
+  // in metal (key rate each), never the keys it has. `stagedKeyIds` are keys
+  // already placed in the trade, which count as held.
   async function planKeyPayment(side, keysNeeded, stagedKeyIds, keyRate, statusCallback) {
     const owner = side === "you" ? "Your" : "Their";
     const staged = new Set((stagedKeyIds || []).map(id => String(id).match(/(\d+)$/)?.[1]).filter(Boolean));
@@ -1401,30 +1427,35 @@
     }
 
     if (have === null) {
-      // Could not count: try the keys, and fall back to metal if adding fails.
-      return { useKeys: true, have: null };
+      // Could not count: try all the keys, and pay in metal only those that cannot be added.
+      return { keysToUse: keysNeeded, have: null };
     }
     if (have >= keysNeeded) {
       statusCallback?.(`${owner} inventory has ${have} ${KEY_NAME}${have === 1 ? "" : "s"}; paying ${keysNeeded} key${keysNeeded === 1 ? "" : "s"}.`);
-      return { useKeys: true, have };
+      return { keysToUse: keysNeeded, have };
     }
     if (!keyRate) {
       throw new Error(
         `${owner} inventory has only ${have} ${KEY_NAME}${have === 1 ? "" : "s"} but ${keysNeeded} ${keysNeeded === 1 ? "is" : "are"} needed, ` +
-        "and no key rate is known to pay the price in metal instead. Start this trade from the arbitrage scanner once so the key rate is remembered."
+        "and no key rate is known to pay the missing keys in metal instead. Start this trade from the arbitrage scanner once so the key rate is remembered."
       );
     }
-    statusCallback?.(`${owner} inventory has only ${have} of the ${keysNeeded} ${KEY_NAME}s needed. Paying the whole price in metal instead (${keyRate} ref per key)…`);
-    return { useKeys: false, have };
+    const missing = keysNeeded - have;
+    statusCallback?.(
+      `${owner} inventory has only ${have} of the ${keysNeeded} ${KEY_NAME}s needed. Paying ${have} key${have === 1 ? "" : "s"} ` +
+      `and the other ${missing} key${missing === 1 ? "" : "s"} in metal (${keyRate} ref per key)…`
+    );
+    return { keysToUse: have, have };
   }
 
   function isKeyShortageError(error) {
     return /found no result for|did not find the exact|No unused .* is left/i.test(String(error?.message || error || ""));
   }
 
-  // The price of one item entirely in metal (ref), and for `count` items.
-  function metalOnlyUnitPrice(tradePrice, keyRate) {
-    return Math.round((tradePrice.keys * keyRate + tradePrice.refined) * 100) / 100;
+  // The metal (ref) paid for `itemCount` items: the ref part of the price plus
+  // the keys that could not be paid as keys, converted at the key rate.
+  function metalForPrice(actualTradePrice, metalKeys, keyRate) {
+    return Math.round((actualTradePrice.refined + (metalKeys > 0 ? metalKeys * keyRate : 0)) * 100) / 100;
   }
 
   async function findNormalWeaponOnCurrentPage(side) {
@@ -2901,9 +2932,9 @@
         try {
           await selectInventorySide("their");
 
-          // When the trader cannot supply every key, the whole price is paid
-          // in metal instead (keys converted at the key rate).
-          let payInMetalOnly = false;
+          // The trader pays with as many keys as they hold; only the keys
+          // they lack are paid in metal (converted at the key rate).
+          let metalKeys = 0;
           if (actualTradePrice.keys > 0 || readItemIds(theirSlots).some(itemId => !paymentBaselineIds.has(itemId))) {
             // Keys left from a failed larger attempt count toward this
             // payment. Trim any surplus locally and search only for the rest.
@@ -2913,10 +2944,8 @@
             let keysToPay = actualTradePrice.keys;
             if (keysToPay > 0) {
               const plan = await planKeyPayment("their", keysToPay, stagedKeyIds, keyRate, statusCallback);
-              if (!plan.useKeys) {
-                payInMetalOnly = true;
-                keysToPay = 0;
-              }
+              metalKeys = keysToPay - plan.keysToUse;
+              keysToPay = plan.keysToUse;
             }
             if (stagedKeyIds.length > keysToPay) {
               await removeTradeItemsFromSide("their", stagedKeyIds.slice(keysToPay), statusCallback);
@@ -2934,33 +2963,24 @@
                   );
                 }
               } catch (error) {
-                // The keys turned out not to be there after all: pay in metal.
+                // Some keys turned out not to be there after all. The keys
+                // already in the trade stay; only the missing ones are paid in metal.
                 if (!keyRate || !isKeyShortageError(error)) throw error;
-                const addedKeyIds = readItemIds(theirSlots)
-                  .filter(itemId => !paymentBaselineIds.has(itemId) && !metalIds.has(itemId));
-                if (addedKeyIds.length) await removeTradeItemsFromSide("their", addedKeyIds, statusCallback);
-                statusCallback?.(`Not enough ${KEY_NAME}s in their inventory. Paying the whole price in metal instead (${keyRate} ref per key)…`);
-                payInMetalOnly = true;
+                const keysInTrade = readItemIds(theirSlots)
+                  .filter(itemId => !paymentBaselineIds.has(itemId) && !metalIds.has(itemId)).length;
+                metalKeys = Math.max(0, actualTradePrice.keys - keysInTrade);
+                statusCallback?.(`Only ${keysInTrade} of the ${actualTradePrice.keys} ${KEY_NAME}s could be added. Paying the other ${metalKeys} in metal (${keyRate} ref per key)…`);
               }
             }
           }
 
-          if (payInMetalOnly) {
-            const unitMetalRef = metalOnlyUnitPrice(tradePrice, keyRate);
+          const metalToPay = metalForPrice(actualTradePrice, metalKeys, keyRate);
+          if (metalToPay > 0) {
             await calculateAndAddMetalToSide(
               "their",
-              Math.round(unitMetalRef * itemCount * 100) / 100,
+              metalToPay,
               statusCallback,
-              unitMetalRef,
-              itemCount,
-              { keepStagedMetalOnShortage: true }
-            );
-          } else if (actualTradePrice.refined > 0) {
-            await calculateAndAddMetalToSide(
-              "their",
-              actualTradePrice.refined,
-              statusCallback,
-              tradePrice.refined,
+              metalKeys > 0 ? Math.round(metalToPay / itemCount * 100) / 100 : tradePrice.refined,
               itemCount,
               { keepStagedMetalOnShortage: true }
             );
@@ -3083,17 +3103,18 @@
       try {
         await selectInventorySide("you");
 
-        // If I cannot supply every key, the whole price is paid in metal
-        // instead (keys converted at the key rate).
-        let payInMetalOnly = false;
+        // I pay with as many keys as I hold; only the keys I lack are paid
+        // in metal (converted at the key rate).
+        let metalKeys = 0;
         if (actualTradePrice.keys > 0) {
           const plan = await planKeyPayment("you", actualTradePrice.keys, [], keyRate, statusCallback);
-          if (plan.useKeys) {
-            statusCallback?.(`Adding ${actualTradePrice.keys}× ${KEY_NAME} from your inventory…`);
+          metalKeys = actualTradePrice.keys - plan.keysToUse;
+          if (plan.keysToUse > 0) {
+            statusCallback?.(`Adding ${plan.keysToUse}× ${KEY_NAME} from your inventory…`);
             const yourItemIds = () => [...(document.querySelector("#your_slots")?.querySelectorAll('.item[id^="item"]') || [])].map(item => item.id);
             const yourItemsBeforeKeys = new Set(yourItemIds());
             try {
-              for (let i = 0; i < actualTradePrice.keys; i++) {
+              for (let i = 0; i < plan.keysToUse; i++) {
                 await addExactNamedItemWithRetry(
                   "you",
                   KEY_NAME,
@@ -3101,23 +3122,25 @@
                 );
               }
             } catch (error) {
-              // The keys turned out not to be there after all: pay in metal.
+              // Some keys turned out not to be there after all. The keys already
+              // added stay; only the missing ones are paid in metal.
               if (!keyRate || !isKeyShortageError(error)) throw error;
-              const addedKeyIds = yourItemIds().filter(itemId => !yourItemsBeforeKeys.has(itemId));
-              if (addedKeyIds.length) await removeTradeItemsFromSide("you", addedKeyIds, statusCallback);
-              statusCallback?.(`Not enough ${KEY_NAME}s in your inventory. Paying the whole price in metal instead (${keyRate} ref per key)…`);
-              payInMetalOnly = true;
+              const keysInTrade = yourItemIds().filter(itemId => !yourItemsBeforeKeys.has(itemId)).length;
+              metalKeys = Math.max(0, actualTradePrice.keys - keysInTrade);
+              statusCallback?.(`Only ${keysInTrade} of the ${actualTradePrice.keys} ${KEY_NAME}s could be added. Paying the other ${metalKeys} in metal (${keyRate} ref per key)…`);
             }
-          } else {
-            payInMetalOnly = true;
           }
         }
 
-        if (payInMetalOnly) {
-          const unitMetalRef = metalOnlyUnitPrice(tradePrice, keyRate);
-          await calculateAndAddMetalToSide("you", Math.round(unitMetalRef * itemCount * 100) / 100, statusCallback, unitMetalRef, itemCount);
-        } else if (actualTradePrice.refined > 0) {
-          await calculateAndAddMetalToSide("you", actualTradePrice.refined, statusCallback, tradePrice.refined, itemCount);
+        const metalToPay = metalForPrice(actualTradePrice, metalKeys, keyRate);
+        if (metalToPay > 0) {
+          await calculateAndAddMetalToSide(
+            "you",
+            metalToPay,
+            statusCallback,
+            metalKeys > 0 ? Math.round(metalToPay / itemCount * 100) / 100 : tradePrice.refined,
+            itemCount
+          );
         }
 
         successfulQuantity = itemCount;

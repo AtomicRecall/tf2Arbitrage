@@ -1976,7 +1976,7 @@ function enqueueTradeJob(result,options={}){
 // an unrecognized item is merely not recognized as already owned.
 const NON_COSMETIC_ITEM_PATTERN=/\b(?:keys?|tickets?|crates?|cases?|tags?|strangifiers?|killstreak|kits?|medals?|paints?|taunts?)\b/i;
 
-async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null){
+async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null,keyPayment=null){
   const rawUrl=String(listing?.tradeUrl||"").trim();
   if(!rawUrl)return {status:"unverified",reason:"No Steam trade-offer URL was found on this listing."};
   let url;
@@ -1999,6 +1999,13 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null){
     verifyParams.set("tmt_wanted",String(itemCheck.wanted));
     verifyParams.set("tmt_quality",itemCheck.quality||"Unique");
     if(itemCheck.cosmetic)verifyParams.set("tmt_cosmetic","1");
+  }
+  // A key price is paid with the trader's physical keys when they hold them,
+  // so the metal check only asks for metal for the keys they lack. Metal Trader
+  // counts the trader's keys and lowers the metal it needs by that many keys.
+  if(Number.isSafeInteger(keyPayment?.keys)&&keyPayment.keys>0&&Number.isFinite(keyPayment.rate)&&keyPayment.rate>0){
+    verifyParams.set("tmt_keys",String(keyPayment.keys));
+    verifyParams.set("tmt_key_rate",String(keyPayment.rate));
   }
   url.hash=verifyParams.toString();
 
@@ -2056,6 +2063,8 @@ async function inspectListingTradeOffer(listing,requiredRef,itemCheck=null){
       counts:response.counts||{},
       items:response.items||0,
       badTrader:response.badTrader===true,
+      keysUsed:Number(response.keysUsed)||0,
+      keysNeeded:Number(response.keysNeeded)||0,
       ownedCopies:Number(response.ownedCopies)||0,
       wantedCopies:Number(response.wantedCopies)||0
     };
@@ -2169,7 +2178,7 @@ async function verifyProfitableListings(result){
     if(url&&inspectionCache.has(inspectionKey)){
       inspection=inspectionCache.get(inspectionKey);
     }else{
-      inspection=await inspectListingTradeOffer(listing,requestedRef,itemCheck);
+      inspection=await inspectListingTradeOffer(listing,requestedRef,itemCheck,{keys:price.keys*quantity,rate:keyRate});
       if(url)inspectionCache.set(inspectionKey,inspection);
     }
     if(inspection.status==="checked"&&inspection.badTrader){
@@ -2216,11 +2225,13 @@ async function verifyProfitableListings(result){
         requestedQuantity:quantity,
         offeredRef:inspection.offeredRef,
         counts:inspection.counts,
-        reason:enough
+        keysUsed:inspection.keysUsed,
+        reason:(enough
           ?affordableQuantity<quantity
             ?`Trader inventory supports ${affordableQuantity} of ${quantity} requested items at ${price.refValue.toFixed(2)} ref each.`
             :`Trader inventory contains enough metal for ${quantity} item${quantity===1?"":"s"} at ${price.refValue.toFixed(2)} ref each.`
-          :`Trader inventory has less metal than the single-item Buy Order price of ${price.refValue.toFixed(2)} ref.`
+          :`Trader inventory has less metal than the single-item Buy Order price of ${price.refValue.toFixed(2)} ref.`)
+          +(inspection.keysUsed>0?` The price's keys are paid with the trader's own keys (${inspection.keysUsed} of ${inspection.keysNeeded} counted); metal is only needed for the rest.`:"")
       }
       :{...inspection,requiredRef:requestedRef,unitPriceRef:price.refValue,quantity,requestedQuantity:quantity};
     result.offerChecks.push({...checkedListing,verification});

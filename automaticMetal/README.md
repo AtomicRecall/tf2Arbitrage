@@ -1,6 +1,11 @@
-# TF2 Metal Trader v0.9.126
+# TF2 Metal Trader v0.9.127
 
 Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam trade offers.
+
+## v0.9.127 — key prices use keys, not their full metal value
+
+- Paying a price that includes keys: the paying side (the trader for a buy order, you for a sell order) pays as many physical keys as it holds, up to the price. Only the keys it lacks are paid in metal, at the key rate, together with the ref part of the price. Before, a single missing key made the whole price (all keys included) be paid in metal. If keys turn out to be missing while adding them, the keys already added stay in the trade.
+- The arbitrage trader metal check does the same: it counts the trader's keys first (`tmt_keys` and `tmt_key_rate` in the check link) and tests only the metal still needed after those keys. The reported available amount includes the keys at the key rate. If the keys cannot be counted, the full metal value is checked as before.
 
 ## v0.9.126 — quicker "already holds this item" check
 
@@ -18,7 +23,7 @@ Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam t
 
 - Before paying a price that includes keys, the add-on searches the paying side's inventory (the trader's for a buy order, yours for a sell order) for `Mann Co. Supply Crate Key` and counts the copies (any keys already placed in the trade count as held).
 - If that side holds every key the price needs, it pays the keys and the metal part as before.
-- If it holds fewer, no keys are used: the whole price is paid in metal, keys converted at the key rate (for example 2 keys = 120 ref at 60 ref per key, plus any ref in the price). If the keys then turn out not to be there while adding them, the keys already added are removed and the metal price is used.
+- If it holds fewer, (v0.9.127) it pays the keys it has and the missing keys in metal at the key rate (for example 3 keys needed, 1 held: 1 key + 2 x 60 ref at 60 ref per key, plus any ref in the price). Before v0.9.127 the whole price was paid in metal.
 - The key rate comes from the arbitrage scanner (`tmt_key_rate` in the offer link) and is remembered, so later manual trades can use the last known rate. With no known rate and too few keys the trade stops with a clear message instead of guessing.
 - Prices without keys are not affected and do no key check.
 

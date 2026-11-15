@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.131
+Current version 0.7.132
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.132 changes:
+- Key prices are no longer checked or paid as their full metal value. The trader metal check (TF2 Metal Trader 0.9.127) first counts the Mann Co. Supply Crate Keys the trader holds and only asks for metal for the keys they lack, plus the ref part of the price. The check's offered amount counts those keys at the key rate, so quantities are worked out as before. The offer-check text says when keys were counted.
+- When the offer is built, the keys the payer holds are traded as keys and only the missing keys are paid in metal (the old rule paid the whole price in metal as soon as one key was missing).
 
 V0.7.131 changes:
 - The check before a trade (does the trader already hold the item?) is quicker: the Steam offer tab is polled every 250 ms instead of every second until it has loaded, the content-script retry waits 120 ms instead of 300 ms, and (in TF2 Metal Trader 0.9.126) the inventory search is believed sooner and the re-count and page-turn pauses are shorter. The load time limits (30 s) are unchanged.
