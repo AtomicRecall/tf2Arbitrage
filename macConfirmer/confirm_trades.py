@@ -36,6 +36,9 @@ CONFIRM_BUTTON = (1323, 928)
 # It is clicked once at the start of every run, before anything else, and is
 # harmless when the button is not showing. Set to None to turn this off.
 TIMEOUT_RETRY_BUTTON = (1321, 849)
+# A second retry button, clicked right after the first one with no pause in
+# between (only the pointer's own move-and-settle time). Set to None to turn it off.
+SECOND_RETRY_BUTTON = (1318, 875)
 # How long to wait after that click: the iPhone takes a while to initialize.
 RETRY_WAIT_SECONDS = (9.0, 11.0)
 
@@ -232,6 +235,8 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
         # A timed-out connection leaves a retry button on screen; press it once
         # (a single click, not the doubled one) before refreshing or accepting.
         click_checked(clicker, TIMEOUT_RETRY_BUTTON, "the connection retry button", check_focus, min(spread, 3), repeat=False)
+        if SECOND_RETRY_BUTTON:
+            click_checked(clicker, SECOND_RETRY_BUTTON, "the second retry button", check_focus, min(spread, 3), repeat=False)
         pause(*RETRY_WAIT_SECONDS, "for the iPhone to reconnect after the retry button")
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)

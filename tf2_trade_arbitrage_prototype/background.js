@@ -848,6 +848,22 @@ async function openStnPurchaseBatch(job,batchNumber,remaining){
 // offer is then accepted and verified exactly like an STN purchase offer.
 const SCRAP_BUY_URL="https://scrap.tf/buy/hats";
 const SCRAP_QUEUE_TIMEOUT_MS=360000;
+// scrap.tf is asked for one trade at a time: the next one is requested only after
+// the previous scrap.tf offer was accepted (Steam Web API state 3), and then only
+// after a few seconds, so scrap.tf's queue is never hit back to back. The gap also
+// separates the trades of two different items.
+const SCRAP_REQUEST_GAP_MIN_MS=6000;
+const SCRAP_REQUEST_GAP_MAX_MS=9000;
+let scrapLastActivityAt=0;
+async function waitForScrapRequestGap(){
+  const gap=randomDelay(SCRAP_REQUEST_GAP_MIN_MS,SCRAP_REQUEST_GAP_MAX_MS);
+  const wait=scrapLastActivityAt?gap-(Date.now()-scrapLastActivityAt):0;
+  if(wait>250){
+    emitTradeAutomationStatus(`Waiting ${Math.ceil(wait/1000)} s after the last scrap.tf trade before asking scrap.tf for the next one…`);
+    await sleep(wait);
+  }
+  scrapLastActivityAt=Date.now();
+}
 const SCRAP_IDLE_TIMEOUT_MS=60000;
 
 async function cancelScrapQueue(tabId){
@@ -1416,6 +1432,9 @@ async function executeTradeJob(job){
         ?`Buying ${remaining} remaining ${job.name} on scrap.tf…`
         :`Reading STN QuickBuy quantities for ${remaining} remaining ${job.name}…`);
       let purchaseBatch=null;
+      // The previous batch (or item) was accepted before this point; scrap.tf
+      // still gets a few seconds before it is asked for another trade.
+      if(job.source==="scrap.tf")await waitForScrapRequestGap();
       for(let attempt=1;!purchaseBatch;attempt++){
         try{
           purchaseBatch=job.source==="scrap.tf"
@@ -1431,7 +1450,13 @@ async function executeTradeJob(job){
         }
       }
       emitTradeAutomationStatus(`${sellerLabel} batch ${batchNumber}: ${sellerLabel} created Steam offer #${stnOfferIdFromUrl(purchaseBatch.offerUrl.href)} for ${purchaseBatch.amount} ${job.name}. Opening it now…`);
-      const acceptedOfferId=await acceptStnPurchaseBatch(job,batchNumber,purchaseBatch.amount,purchaseBatch.offerUrl,steamApiKey);
+      let acceptedOfferId;
+      try{
+        acceptedOfferId=await acceptStnPurchaseBatch(job,batchNumber,purchaseBatch.amount,purchaseBatch.offerUrl,steamApiKey);
+      }finally{
+        // The gap before the next scrap.tf request counts from here.
+        if(job.source==="scrap.tf")scrapLastActivityAt=Date.now();
+      }
       job.purchasedQuantity+=purchaseBatch.amount;
       recordPurchase(job,purchaseBatch.amount,acceptedOfferId);
       // (The middle1/middle2 sound for this trade already played when the
