@@ -224,6 +224,27 @@ only contain the number of trades and, for a failure, the error text, never item
 account details. `--no-notify` switches it off, `--ntfy-topic` / `--ntfy-server` change where it goes
 (for example a self-hosted ntfy). In `--dry-run` nothing is sent.
 
+**Only when the phone is not ready, and a "you can use your phone" message.** The server can check one spot
+of the screen. With iPhone Mirroring showing the Steam confirmations page, that spot has a certain colour; you save
+it once. Before a run the server takes a tiny screenshot of the spot: if it has the saved colour, the phone is
+already on the confirmations page, so no "Lock your iPhone" message is sent and the clicks start. If it has another
+colour, the message is sent and the Mac starts as soon as the colour shows up (at most `--phone-wait`, 120 s). When
+the confirmations are done and nothing else is waiting, a second message, "You can use your phone", is sent (only if
+the first one was).
+
+```bash
+python3 macConfirmer/confirm_server.py --pick-phone-spot        # put the mouse on the spot within 5 s; the phone must show the confirmations page
+python3 macConfirmer/confirm_server.py --phone-spot 1308,578    # or give the position yourself (add --phone-color R,G,B to give the colour too)
+python3 macConfirmer/confirm_server.py --check-phone            # prints what the spot looks like now
+```
+
+Positions are screen points, the numbers `cliclick p` prints (the same as the click positions in
+`confirm_trades.py`). Choose a spot of the page that is always the same colour, such as the page background, not
+text or a trade. The first time, macOS asks Terminal (or TF2 Trader) for Screen Recording permission (System Settings
+> Privacy & Security). The spot is saved in `server_config.json`; do it again if you move the mirroring window. If
+the screen cannot be read, the message is sent every time. `--phone-tolerance` changes how far each of R, G and B
+may differ (24), `--no-phone-check` ignores the saved spot.
+
 ---
 
 ## Safety and limits

@@ -43,6 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import confirm_trades
+import phone_state
 
 CONFIG_FILE = Path(__file__).with_name("server_config.json")
 MAX_BODY_BYTES = 4096
@@ -51,12 +52,12 @@ HISTORY_LENGTH = 20
 
 
 def load_token():
-    if CONFIG_FILE.exists():
-        token = json.loads(CONFIG_FILE.read_text()).get("token")
-        if token:
-            return token
+    config = phone_state.load_config()
+    if config.get("token"):
+        return config["token"]
     token = secrets.token_urlsafe(24)
-    CONFIG_FILE.write_text(json.dumps({"token": token}))
+    config["token"] = token  # keeps the other settings (ntfy topic, phone check)
+    CONFIG_FILE.write_text(json.dumps(config))
     try:
         CONFIG_FILE.chmod(0o600)
     except OSError:
@@ -71,8 +72,11 @@ def log(message):
 
 # ---- phone notification (ntfy) ---------------------------------------------------
 # The Mac drives the iPhone through iPhone Mirroring, which only works while the
-# phone is locked and not in use. Before each run the server sends a push
-# notification (through ntfy, https://ntfy.sh) so you can put the phone down. The
+# phone is locked and not in use. Before a run the server looks at the colour of one
+# spot of the mirroring window (see phone_state.py): when it shows the Steam
+# confirmations page (the phone is ready) it just goes on, otherwise it sends a push notification (through ntfy, https://ntfy.sh) so you can
+# put the phone down, and when the run is over it sends another one saying the
+# phone is free again. Without a calibration it always sends the first one. The
 # message is generic: no item, offer or account information is sent. The topic is a
 # random name created on first start and kept in server_config.json (it is the only
 # "password" of the channel, so keep it private); subscribe to it in the ntfy app.
@@ -144,9 +148,13 @@ def preflight(dry_run):
 class Confirmer:
     """Owns the queue and the single worker that performs the clicks."""
 
-    def __init__(self, dry_run, min_delay, max_delay, max_per_hour, notifier=None, notify_lead=0.0):
+    def __init__(self, dry_run, min_delay, max_delay, max_per_hour, notifier=None, notify_lead=0.0,
+                 phone=None, phone_wait=120.0):
         self.notifier = notifier or Notifier(None, "")
         self.notify_lead = max(0.0, notify_lead)
+        self.phone = phone  # phone_state.PhoneCheck, or None when no spot was saved
+        self.phone_wait = max(0.0, phone_wait)
+        self.phone_taken = False  # the phone was asked for and has not been given back yet
         self.dry_run = dry_run
         self.min_delay, self.max_delay = min_delay, max_delay
         self.max_per_hour = max_per_hour
@@ -236,20 +244,62 @@ class Confirmer:
             self.busy = True
             return total, ids
 
+    def _phone_state(self):
+        """"free" (the spot shows the saved colour: ready), "busy" (it does not) or "unknown" (no spot saved, or the screen could not be read)."""
+        if not self.phone:
+            return "unknown"
+        try:
+            state, details = self.phone.look()
+        except Exception as error:  # a failed look must never block a run
+            log(f"Could not read the spot on the screen ({error}); treating the phone as in use.")
+            return "unknown"
+        log(f"Phone check: {'ready (on the confirmations page)' if state == 'free' else 'NOT ready'} ({details}).")
+        return state
+
+    def _ask_for_phone(self, count):
+        """Makes sure the phone is not in use before the Mac takes it over."""
+        state = self._phone_state()
+        if state == "free":
+            log("The phone is already on the confirmations page: no notification needed.")
+            return
+        sent = self.notifier.send(
+            "Lock your iPhone",
+            f"{count} trade{'s' if count != 1 else ''} to confirm. Put your phone down and lock it now: "
+            f"the Mac takes it over in {int(self.notify_lead)} seconds.",
+        )
+        if not sent:
+            return
+        self.phone_taken = True
+        if state != "busy":
+            log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
+            time.sleep(self.notify_lead)
+            return
+        # The spot does not show the confirmations page: go on as soon as it does.
+        log(f"Sent the phone notification; waiting up to {self.phone_wait:.0f}s for the confirmations page to show.")
+        deadline = time.time() + self.phone_wait
+        while time.time() < deadline:
+            time.sleep(2.0)
+            if self._phone_state() == "free":
+                time.sleep(1.5)
+                return
+        log("The confirmations page did not show up in time; trying anyway.")
+
+    def _give_phone_back(self, text):
+        """Tells you the phone is free again, once nothing more is waiting for it."""
+        with self.cond:
+            if not self.phone_taken or self.queue:
+                return
+            self.phone_taken = False
+        if not self.dry_run:
+            self.notifier.send("You can use your phone", text, priority="default", tags="iphone")
+
     def _worker(self):
         while True:
             count, ids = self._next_batch()
             try:
                 # The phone has to be locked and unused while the Mac clicks on it.
                 if not self.dry_run and self.notifier.enabled:
-                    sent = self.notifier.send(
-                        "Lock your iPhone",
-                        f"{count} trade{'s' if count != 1 else ''} to confirm. Put your phone down and lock it now: "
-                        f"the Mac takes it over in {int(self.notify_lead)} seconds.",
-                    )
-                    if sent:
-                        log(f"Sent the phone notification; waiting {self.notify_lead:.0f}s before clicking.")
-                        time.sleep(self.notify_lead)
+                    self._ask_for_phone(count)
                 delay = random.uniform(self.min_delay, self.max_delay)
                 log(f"Accepting {count} trade{'s' if count != 1 else ''} in {delay:.1f}s…")
                 time.sleep(delay)
@@ -260,6 +310,7 @@ class Confirmer:
                     self.confirmed_times.extend([time.time()] * count)
                     self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": True})
                 log(f"Done: {count} accepted." if not self.dry_run else f"Done (DRY RUN: nothing was actually clicked) for {count}.")
+                self._give_phone_back(f"{count} trade{'s' if count != 1 else ''} confirmed. The Mac is done with your phone.")
             except BaseException as error:  # a failed run must never be repeated blindly
                 reason = str(error) or error.__class__.__name__
                 with self.cond:
@@ -268,9 +319,11 @@ class Confirmer:
                     self.history.append({"at": time.strftime("%H:%M:%S"), "count": count, "ids": ids, "ok": False, "error": reason})
                 log(f"FAILED: {reason}. Paused until POST /resume.")
                 if not self.dry_run:
+                    self.phone_taken = False  # this message says it too
                     self.notifier.send(
                         "Confirming trades failed",
-                        f"The Mac could not accept the trade confirmation and paused: {reason[:150]}",
+                        f"The Mac could not accept the trade confirmation and paused: {reason[:150]}. "
+                        f"The Mac is not using your phone now.",
                         priority="high", tags="warning",
                     )
             finally:
@@ -369,6 +422,19 @@ def main():
     parser.add_argument("--notify-lead", type=float, default=20.0,
                         help="seconds to wait after the notification before clicking, so you can lock the phone (default %(default)s)")
     parser.add_argument("--test-notification", action="store_true", help="send one test notification and exit")
+    parser.add_argument("--pick-phone-spot", action="store_true",
+                        help="save the colour of the spot under the mouse pointer (the iPhone must be on the Steam "
+                             "confirmations page), then exit; see phone_state.py")
+    parser.add_argument("--pick-delay", type=int, default=5, help="seconds to wait before --pick-phone-spot reads the pointer (default %(default)s)")
+    parser.add_argument("--phone-spot", metavar="X,Y",
+                        help="the spot to check, in screen points; its colour is read now (or given with --phone-color)")
+    parser.add_argument("--phone-color", metavar="R,G,B", help="with --phone-spot: the colour the spot has on the confirmations page")
+    parser.add_argument("--phone-tolerance", type=int, default=0,
+                        help=f"with --pick-phone-spot / --phone-spot: how far each of R, G and B may differ (default {phone_state.TOLERANCE})")
+    parser.add_argument("--check-phone", action="store_true", help="look at the saved spot now, print what it shows and exit")
+    parser.add_argument("--no-phone-check", action="store_true", help="always send the 'lock your iPhone' notification, without looking at the spot")
+    parser.add_argument("--phone-wait", type=float, default=120.0,
+                        help="when the spot does not show the confirmations page, wait at most this many seconds for it to (default %(default)s)")
     parser.add_argument("--wheel-events", type=int, default=confirm_trades.WHEEL_EVENTS)
     parser.add_argument("--wheel-lines", type=int, default=confirm_trades.WHEEL_LINES)
     parser.add_argument("--refresh-y-offset", type=int, default=confirm_trades.REFRESH_Y_OFFSET)
@@ -383,6 +449,35 @@ def main():
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
     confirm_trades.CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
 
+    if args.pick_phone_spot or args.phone_spot or args.check_phone:
+        try:
+            if args.pick_phone_spot or args.phone_spot:
+                if args.phone_spot:
+                    spot = tuple(int(value) for value in args.phone_spot.split(","))
+                    if len(spot) != 2:
+                        parser.error("--phone-spot needs two numbers: X,Y")
+                else:
+                    print(f"Put the mouse pointer on the spot (iPhone Mirroring must show the Steam confirmations page). "
+                          f"Reading it in {args.pick_delay} seconds…", flush=True)
+                    time.sleep(args.pick_delay)
+                    spot = phone_state.pointer_position()
+                color = None
+                if args.phone_color:
+                    color = [int(value) for value in args.phone_color.split(",")]
+                    if len(color) != 3 or not all(0 <= value <= 255 for value in color):
+                        parser.error("--phone-color needs three numbers from 0 to 255: R,G,B")
+                saved = phone_state.save_spot(spot, color, args.phone_tolerance)
+                print(f"Saved: spot {saved['spot'][0]},{saved['spot'][1]} with colour rgb{tuple(saved['color'])} in {CONFIG_FILE.name}.")
+            else:
+                check = phone_state.PhoneCheck.from_config()
+                if not check:
+                    sys.exit("No spot saved yet: run --pick-phone-spot while the phone shows the confirmations page.")
+                state, details = check.look()
+                print(f"{'READY: the spot shows the confirmations page' if state == 'free' else 'NOT ready: the spot has another colour'} ({details}).")
+        except (RuntimeError, ValueError) as error:
+            sys.exit(f"Phone check failed: {error}")
+        sys.exit(0)
+
     notifier = Notifier(args.ntfy_server, "" if args.no_notify else (args.ntfy_topic or load_ntfy_topic()))
     if args.test_notification:
         if not notifier.enabled:
@@ -393,13 +488,19 @@ def main():
     preflight(args.dry_run)
     token = load_token()
     allowed = {ipaddress.ip_address(item) for item in args.allow}
-    confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour, notifier, args.notify_lead)
+    phone = None if args.no_phone_check else phone_state.PhoneCheck.from_config()
+    confirmer = Confirmer(args.dry_run, args.min_delay, args.max_delay, args.max_per_hour, notifier, args.notify_lead,
+                          phone, args.phone_wait)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(confirmer, token, allowed))
     log(f"Listening on {args.host}:{args.port}{' (DRY RUN: no clicks)' if args.dry_run else ''}")
     log(f"Token: {token}")
     if notifier.enabled:
         log(f"Phone notifications: install the ntfy app and subscribe to the topic \"{notifier.topic}\" "
             f"on {notifier.server} (lock-screen alerts before each confirmation run, {args.notify_lead:.0f}s ahead).")
+        if phone:
+            log("Phone check: the saved spot is looked at first; the 'lock your iPhone' alert is only sent when it does not show the confirmations page.")
+        else:
+            log("Phone check: no spot saved, so the alert is sent before every run (python3 confirm_server.py --pick-phone-spot).")
     else:
         log("Phone notifications are off.")
     try:
