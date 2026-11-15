@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.134
+Current version 0.7.135
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,9 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.135 changes:
+- The Stop and Check saved items buttons play a click animation in the popup: a pulse ring right after the click, and a light sweep across the button while the request is being answered (turned off for people who prefer reduced motion).
 
 V0.7.134 changes:
 - Everything to do with trade offers now happens in the main window instead of the scanner window: the Steam offer checks made while scanning (metal and bad-trader checks), the STN purchase, the purchase offer and the bot offers all open as an active tab in the main window. The tab you were on comes back when the offer tab closes. Backpack.tf and scrap.tf pages used for scanning still open in the scanner window. Only if no main window is known does an offer use the scanner window.

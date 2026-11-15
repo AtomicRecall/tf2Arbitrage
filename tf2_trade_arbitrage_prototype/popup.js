@@ -588,7 +588,18 @@ volume.oninput=()=>{
 scan.onclick=()=>startScan("START_SCAN",{sites:"all"});
 scanStn.onclick=()=>startScan("START_SCAN",{sites:"stn"});
 scanScrap.onclick=()=>startScan("START_SCAN",{sites:"scrap.tf"});
-scanSaved.onclick=()=>startScan("START_SAVED_SCAN");
+// Click feedback done in the popup itself: a pulse ring right after the click and, while the
+// request is being answered, a light sweep across the button.
+function clickFeedback(button,work){
+  button.classList.remove("btn-pulse");
+  void button.offsetWidth;
+  button.classList.add("btn-pulse");
+  setTimeout(()=>button.classList.remove("btn-pulse"),700);
+  if(!work)return;
+  button.classList.add("btn-busy");
+  Promise.resolve(work).catch(()=>{}).finally(()=>setTimeout(()=>button.classList.remove("btn-busy"),350));
+}
+scanSaved.onclick=()=>clickFeedback(scanSaved,startScan("START_SAVED_SCAN"));
 scanReverse.onclick=()=>startScan("START_REVERSE_SCAN");
 async function startScan(type,extra={}){
   api.storage.local.set({keyRate:+rate.value||63});
@@ -605,7 +616,8 @@ async function startScan(type,extra={}){
   const sourceText=Object.entries(r.sources||{}).map(([name,count])=>name==="stn-reverse"?`${count} STN buy-price checks`:`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
   status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
-stop.onclick=async()=>{await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`};
+async function stopScanClicked(){await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
+stop.onclick=()=>clickFeedback(stop,stopScanClicked());
 
 api.runtime.onMessage.addListener(async m=>{
   if(m.type==="TRADE_AUTOMATION_STATUS"){
