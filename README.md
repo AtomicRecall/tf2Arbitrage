@@ -144,7 +144,14 @@ The "sell to STN" direction of **Scan Pages** (left out by Scan No Sell and Scan
 (the "Sell it for" box on the hat's own STN page, plus how many more STN will buy) and compares it with the
 cheapest bot sell listing on Backpack.tf. Hats where Backpack.tf is at least 0.05 ref cheaper land in the
 **Sell to STN** tab with a notification. This side is report-only: nothing is bought automatically.
-It is slow (two pages per hat), though hats STN will not buy more of are skipped quickly.
+It is slow (two pages per hat), though hats STN will not buy more of are skipped quickly. scrap.tf hats never get this
+check; they get their own sell-to-STN check instead: **buy on scrap.tf, sell to STN**. For every scrap.tf hat the add-on
+reads STN's "Sell it for" price on the hat's STN page and compares it with the scrap.tf price (at least 0.05 ref
+cheaper on scrap.tf is a hit in the **Sell to STN** tab, report-only like the check above; hats STN does not buy are
+remembered for 60 minutes). Only **Scan Pages** does these two sell-to-STN checks. The STN page and
+the Backpack.tf stats page are read once per hat and shared by its checks: STN's page first (what STN pays), then
+Backpack.tf (buy orders and sell listings from one page), then the scrap.tf price is compared with both. Each hat's two
+directions are checked back to back (forward check, then this one), so a hat is fully checked before the next one starts.
 
 ### Automatic trading
 
@@ -185,7 +192,9 @@ Closing only the scanner window by hand stops a running scan.
 Anything to do with trade offers (the Steam offer checks while scanning, the STN purchase, the offers sent to bots)
 happens in the main window, as an active tab; the tab you were on comes back afterwards. When a scan of an STN
 page finishes, the add-on refreshes that STN tab, presses PageDown 3 times and scans again until you press Stop
-(checkbox in the popup to turn it off).
+(checkbox in the popup to turn it off). After 3 such rounds the next one loads the first page of the STN hats listing
+(`https://stntrading.eu/tf2/hats?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1`)
+instead of refreshing, presses PageDown 3 times and scans that, then the count of 3 starts again.
 
 When the scanner window opens it comes up on top of iPhone Mirroring, so the add-on then asks the confirm server
 (`POST /focus`) to bring iPhone Mirroring back to the front. This only happens when the Mac confirmer is set up

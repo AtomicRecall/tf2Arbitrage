@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.138
+Current version 0.7.143
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,24 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.143 changes:
+- Click animation fix: the three scan buttons did not clip their own light sweep like Stop and Check saved items did (the sweep was drawn against the whole popup instead of the button), and the pulse ring is now 8 px at most so the popup's side padding (10-12 px) can never cut it off.
+
+V0.7.142 changes:
+- Every item is now checked as one run of steps, in this order, and each page is read once for all of them: 1) STN: the hat's STN page is opened first and what STN pays for it (and how many more it buys) is stored; 2) Backpack.tf: the hat's stats page is read once for both the Buy Orders (buy on the marketplace, sell to a bot) and the sell listings (buy on Backpack.tf, sell to STN); 3) scrap.tf: the scrap.tf price (from the scrap.tf page that is open) is used for the same comparisons: buy on scrap.tf and sell on Backpack.tf, and buy on scrap.tf and sell to STN, using the prices stored in steps 1 and 2. The page loads that used to be repeated (the Backpack.tf stats page for the sell-to-STN check, and the STN page for the scrap.tf one) are gone. Scan No Sell and Scan Offline skip the STN page and the sell listings, as before.
+
+V0.7.141 changes:
+- New check for scrap.tf items: buy on scrap.tf, sell to STN. Right after an item's normal check (buy on scrap.tf, sell on Backpack.tf) the add-on opens that item's STN page and compares STN's "Sell it for" price with the scrap.tf price. A difference of at least 0.05 ref lands in the Sell to STN tab with a notification (report-only: nothing is bought automatically on this side). No Backpack.tf page is opened for it. An item whose STN page shows no buy price is remembered as such for 60 minutes. It is only done by Scan Pages (Scan No Sell and Scan Offline leave out everything that sells to STN).
+- The Backpack.tf -> STN reverse check stays for STN items only (an item that scrap.tf sells cheaper gets the new scrap.tf -> STN check instead).
+- A scrap.tf item now counts as fully checked only when both of its directions are done (like an STN item); otherwise the scrap.tf page marks it "Half checked", and the Checked tab shows both lines.
+
+V0.7.140 changes:
+- scrap.tf never gets a reverse check. An item that scrap.tf sells cheaper than STN (or that only scrap.tf lists) is checked buying on scrap.tf and selling on Backpack.tf only; the reverse check (buy on Backpack.tf, sell to STN) is done only for items whose cheaper (or only) source is STN.
+
+V0.7.139 changes:
+- STN auto rescan: after 3 rounds of refresh + PageDown 3 times + scan, the next round loads the first page of the STN hats listing instead of refreshing (https://stntrading.eu/tf2/hats?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1), presses PageDown 3 times and scans it, and the count of 3 starts again. A scan you start yourself also starts the count again.
+- The reverse check (buy on Backpack.tf, sell to STN) now runs right after the forward check of the same item, one item after the other (before, a scrap.tf item could come in between, and the reverse check of an item that scrap.tf sells cheaper was left to the end of the scan). Both directions of an item are therefore finished together. Items STN does not buy more of still end their reverse check early.
 
 V0.7.138 changes:
 - The sounds are now equally loud. They differed a lot in the files themselves, which made some look like they ignored the volume slider (the slider was applied to all of them): middle1.wav was about 14 dB louder than hit.mp3 and Item_metal_pot_drop.wav about 5 dB louder, while middle2.wav was about 17 dB quieter. middle1.wav, middle2.wav and Item_metal_pot_drop.wav were rebalanced to hit.mp3's loudness (peaks kept below -5 dBFS); hit.mp3 is unchanged. The slider still scales them all the same way.

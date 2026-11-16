@@ -181,6 +181,13 @@ function removeExistingCard(key){
 function reverseCardHtml(r){
   if(r.skipped)return `<div class="line reason">${esc(r.reason)}</div>`;
   const profit=Number(r.profitRef)||0;
+  if(r.scrapToStn){
+    const scrapLink=safeWebUrl(r.sourceItem?.href);
+    return `<div class="line">Buy on scrap.tf: ${esc(r.scrapPrice?.display||r.sourceItem?.price||"?")}</div>`+
+      `<div class="line">STN pays: ${esc(r.stnPrice?.display||"?")} · STN will buy ${Number(r.stnCapacity)||0} more</div>`+
+      `<div class="line ${r.reverseDeal?"profit":"lossText"}">${profit>=0?"+":""}${profit.toFixed(2)} ref${r.reverseDeal?" (buy on scrap.tf, sell to STN)":" (not profitable)"}</div>`+
+      (scrapLink?`<div class="market-actions"><a class="market-link" href="${esc(scrapLink)}" target="_blank" rel="noopener">Open scrap.tf</a></div>`:"");
+  }
   const note=r.reverseDeal?" (buy on Backpack.tf, sell to STN)":(r.humanOnly?" (only non-bot sellers listed)":" (not profitable)");
   let html=`<div class="line">Buy on Backpack.tf: ${esc(r.bpPrice?.display||"?")}${r.bestListing?.listingName?` — ${esc(r.bestListing.listingName)}`:""}</div>`+
     `<div class="line">STN pays: ${esc(r.stnPrice?.display||"?")} · STN will buy ${Number(r.stnCapacity)||0} more</div>`+
@@ -804,13 +811,13 @@ function renderChecked(){
   }
   const rows=entries.map(entry=>{
     const scrap=entry.source==="scrap.tf";
-    const full=scrap?Boolean(entry.forward):Boolean(entry.forward&&entry.reverse);
+    const full=Boolean(entry.forward&&entry.reverse);
     const lines=["forward","reverse"].filter(direction=>entry[direction]).map(direction=>{
       const block=entry[direction];
-      const label=direction==="forward"?`Buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf`:"Buy on Backpack.tf, sell to STN";
+      const label=direction==="forward"?`Buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf`:(block.via==="scrap.tf"?"Buy on scrap.tf, sell to STN":"Buy on Backpack.tf, sell to STN");
       return `<div class="line">${esc(label)}: at ${esc(block.price||"?")} · ${esc(checkedOutcomeText(block))} · ${esc(new Date(Number(block.checkedAt)).toLocaleTimeString())} · ${Math.max(1,Math.ceil((block.expiresAt-Date.now())/60000))} min left</div>`;
     }).join("");
-    const missing=full?"":`<div class="small">${entry.forward?"Not yet checked: buy on Backpack.tf, sell to STN.":`Not yet checked: buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf.`}</div>`;
+    const missing=full?"":`<div class="small">${entry.forward?(scrap?"Not yet checked: buy on scrap.tf, sell to STN.":"Not yet checked: buy on Backpack.tf, sell to STN."):`Not yet checked: buy on ${scrap?"scrap.tf":"STN"}, sell on Backpack.tf.`}</div>`;
     return `<div class="checked-row ${esc(entry.outcome||"")}"><div class="checked-top"><span class="checked-name">${esc(entry.name)}</span>${sourceBadge(scrap?"scrap.tf":"stn").trim()}<span class="checked-timer">${full?"Fully checked":"Half checked"} · ${minutesLeft(entry)} min left</span></div>`+lines+missing+`</div>`;
   }).join("");
   checkedView.innerHTML=

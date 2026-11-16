@@ -1562,9 +1562,9 @@
       const minutes=Math.floor(left/60),seconds=left%60;
       return `${label||"Checked"} · next in ${minutes}:${String(seconds).padStart(2,"0")}`;
     }
-    // How much of an item is checked. A scrap.tf item has one direction (buy there,
-    // sell on Backpack.tf). An STN item has two: that one, and buying on
-    // Backpack.tf to sell to STN. Both fresh = full, one = partial. A row from
+    // How much of an item is checked. An item has two directions: buy on this site and
+    // sell on Backpack.tf, and selling to STN (for an STN item buying on Backpack.tf,
+    // for a scrap.tf item buying here). Both fresh = full, one = partial. A row from
     // before directions existed (no "forward"/"reverse" keys) is a forward check.
     function checkedState(entry,info,now){
       if(!entry)return null;
@@ -1574,10 +1574,10 @@
       const samePrice=block=>block&&Number(block.expiresAt)>now&&norm(block.price)===norm(info.price);
       const done=[];
       if(samePrice(forward)&&(entry.source==="scrap.tf"?"scrap.tf":"stn")===site)done.push({dir:"forward",expiresAt:Number(forward.expiresAt)});
-      if(!onScrap&&samePrice(reverse))done.push({dir:"reverse",expiresAt:Number(reverse.expiresAt)});
+      if(samePrice(reverse))done.push({dir:"reverse",expiresAt:Number(reverse.expiresAt)});
       if(!done.length)return null;
-      const full=done.length>=(onScrap?1:2);
-      const missing=full?"":(done[0].dir==="forward"?"Not yet checked: buying on Backpack.tf to sell to STN.":"Not yet checked: buying here to sell on Backpack.tf.");
+      const full=done.length>=2;
+      const missing=full?"":(done[0].dir==="forward"?(onScrap?"Not yet checked: buying here to sell to STN.":"Not yet checked: buying on Backpack.tf to sell to STN."):"Not yet checked: buying here to sell on Backpack.tf.");
       return {
         full,
         expiresAt:Math.min(...done.map(block=>block.expiresAt)),

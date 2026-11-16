@@ -2794,20 +2794,22 @@ function alreadyCheckedResult(entry,block,direction){
       ?(reverse?"no usable STN price or sell listing":"no usable Buy Order")
       :"not profitable";
   const scrap=!reverse&&entry.source==="scrap.tf";
+  const scrapToStn=reverse&&entry.scrapToStn===true;
   return {
     name:entry.name,
     skipped:true,
     alreadyChecked:true,
     checkedDirection:direction,
-    source:reverse?"stn":entry.source,
-    reason:`Already checked${reverse?" (buy on Backpack.tf, sell to STN)":""} ${Math.max(1,Math.round((Date.now()-block.checkedAt)/60000))} min ago at ${block.price} (${outcome}). Checks again in ${Math.max(1,Math.ceil((block.expiresAt-Date.now())/60000))} min.`,
+    source:reverse&&!scrapToStn?"stn":entry.source,
+    reason:`Already checked${reverse?(scrapToStn?" (buy on scrap.tf, sell to STN)":" (buy on Backpack.tf, sell to STN)"):""} ${Math.max(1,Math.round((Date.now()-block.checkedAt)/60000))} min ago at ${block.price} (${outcome}). Checks again in ${Math.max(1,Math.ceil((block.expiresAt-Date.now())/60000))} min.`,
     checkedAt:block.checkedAt,
     checkedExpiresAt:block.expiresAt,
     checkedOutcome:block.outcome,
     sourceItem:{
       name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||marketplaceUrl(entry.name),
       ...(scrap?{source:"scrap.tf",scrapValue:Number(entry.scrapValue)||null}:{}),
-      ...(reverse?{source:"stn",reverse:true}:{})
+      ...(reverse&&!scrapToStn?{source:"stn",reverse:true}:{}),
+      ...(scrapToStn?{source:"scrap.tf",scrapValue:Number(entry.scrapValue)||null,reverse:true}:{})
     },
     attempts:[]
   };
@@ -2830,7 +2832,8 @@ function recordCheckedItem(result){
     TF2CheckedItems.record(map,{
       name:result.name,
       direction:result.reverse?"reverse":"forward",
-      source:result.reverse?"stn":result.source,
+      source:result.reverse&&!result.scrapToStn?"stn":result.source,
+      via:result.scrapToStn?"scrap.tf":"",
       price:result.sourceItem.price,
       outcome:(result.deal||result.reverseDeal)?"good":(result.skipped?"not-found":"not-good"),
       note:result.skipped?result.reason:"",
@@ -2956,6 +2959,26 @@ async function refreshItemFromScrap(item){
 // cheapest sell listings on its Backpack.tf stats page. When the cheapest bot
 // listing costs at least MIN_PROFIT_REF less than STN pays, it is reported.
 // Nothing is bought automatically on this side.
+// What was read for an item during this scan, so the checks of one item share it: STN's item page
+// (what STN pays, and how many more it buys) is opened once, and the Backpack.tf stats page serves
+// both the buy orders (forward check) and the sell listings (sell-to-STN check).
+const scanItemData=new Map();
+const SCAN_ITEM_DATA_TTL_MS=10*60000;
+function itemData(name){
+  const key=TF2CheckedItems.keyFor(name);
+  let entry=scanItemData.get(key);
+  if(!entry||Date.now()-entry.at>SCAN_ITEM_DATA_TTL_MS){
+    entry={at:Date.now(),stn:null,bpSell:null};
+    scanItemData.set(key,entry);
+  }
+  return entry;
+}
+async function cachedStnBuyPrice(item){
+  const entry=itemData(item.name);
+  if(!entry.stn)entry.stn=await readStnBuyPrice(item);
+  return entry.stn;
+}
+
 async function readStnBuyPrice(item){
   const url=marketplaceUrl(item.name);
   let tab=null;
@@ -2975,7 +2998,7 @@ async function readStnBuyPrice(item){
       if(page?.status==="ready")break;
       await sleep(500);
     }
-    if(!page||page.status!=="ready")return {ok:false,reason:"STN shows no buy price for this item (or its page did not load)."};
+    if(!page||page.status!=="ready")return {ok:false,noPrice:true,reason:"STN shows no buy price for this item (or its page did not load)."};
     return {ok:true,price:page.price,capacity:page.capacity};
   }catch(error){
     return {ok:false,reason:`Could not open the STN item page: ${error?.message||error}`};
@@ -3016,7 +3039,7 @@ async function processReverseItem(item){
     attempts:[]
   };
   await highlightSourceItem(item.name,"stn");
-  const stn=await readStnBuyPrice(item);
+  const stn=await cachedStnBuyPrice(item);
   if(!running){scanItemBusy=false;return}
   if(!stn.ok){await finish({...base,skipped:true,reason:stn.reason});return}
   const stnPrice=parsePrice(stn.price);
@@ -3032,8 +3055,9 @@ async function processReverseItem(item){
   const backpackUrl=resolved.url;
   base.backpackUrl=backpackUrl;
   base.attempts=[{name:item.name,url:backpackUrl,source:"stats",status:"opened"}];
-  let data=null;
-  try{
+  // The forward check of this item may have read the sell listings from the same stats page already.
+  let data=itemData(item.name).bpSell?.data||null;
+  if(!data)try{
     const tab=await createScanTab(backpackUrl);
     ownedTabIds.add(tab.id);
     ownedTabUrls.set(tab.id,backpackUrl);
@@ -3082,8 +3106,61 @@ async function processReverseItem(item){
   });
 }
 
+// A scrap.tf item against STN's buy price: buy on scrap.tf, sell to STN. Only STN's item page is
+// read (no Backpack.tf page). Report-only, like the Backpack.tf -> STN check.
+async function processScrapToStnItem(item){
+  const base={
+    name:item.name,
+    reverse:true,
+    scrapToStn:true,
+    source:"scrap.tf",
+    sourceItem:{name:item.name,price:item.price||"",stock:item.stock??null,href:item.href||SCRAP_BUY_URL,source:"scrap.tf",scrapValue:Number(item.scrapValue)||null,reverse:true},
+    attempts:[]
+  };
+  await highlightSourceItem(item.name,"scrap.tf");
+  const scrapPrice=parsePrice(item.price);
+  if(!scrapPrice){await finish({...base,skipped:true,reason:"Could not parse the scrap.tf price."});return}
+  base.scrapPrice=scrapPrice;
+  if(item.stock!==null&&item.stock!==undefined&&item.stock!==""&&Number.isFinite(Number(item.stock))&&Number(item.stock)<=0){
+    await finish({...base,skipped:true,reason:`scrap.tf has none in stock right now (${item.price}).`});
+    return;
+  }
+  const stn=await cachedStnBuyPrice(item);
+  if(!running){scanItemBusy=false;return}
+  // A page that loaded but shows no buy price means STN does not buy this item at all: that is an
+  // answer (remembered for 60 minutes), unlike a page that did not load.
+  if(!stn.ok){await finish({...base,skipped:true,reason:stn.noPrice?"STN has no buy price for this item.":stn.reason});return}
+  const stnPrice=parsePrice(stn.price);
+  if(!stnPrice){await finish({...base,skipped:true,reason:`Could not parse STN's buy price (${stn.price}).`});return}
+  base.stnPrice=stnPrice;
+  base.stnCapacity=stn.capacity;
+  if(!(stn.capacity>0)){
+    await finish({...base,skipped:true,reason:`STN is not buying more of this item right now (it would pay ${stn.price}).`});
+    return;
+  }
+  const profitRef=stnPrice.refValue-scrapPrice.refValue;
+  await finish({...base,profitRef,reverseDeal:profitRef+0.0000001>=MIN_PROFIT_REF});
+}
+
 function notifyReverseHit(result){
   if(!result?.reverseDeal||!result.name)return;
+  if(result.scrapToStn){
+    const scrapKey=`scrap-to-stn|${String(result.name).toLowerCase()}|${result.profitRef.toFixed(4)}`;
+    if(notifiedDeals.has(scrapKey))return;
+    notifiedDeals.add(scrapKey);
+    const scrapNotificationId=`tf2-hit-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    notificationTargets.set(scrapNotificationId,result.sourceItem?.href||SCRAP_BUY_URL);
+    try{
+      const created=api.notifications.create(scrapNotificationId,{
+        type:"basic",
+        title:"💰 SCRAP.TF → STN HIT",
+        message:`${result.name}\nscrap.tf ${result.scrapPrice?.display||"?"} → STN pays ${result.stnPrice?.display||"?"}\nPROFIT: +${result.profitRef.toFixed(2)} ref`,
+        iconUrl:api.runtime.getURL("hit-icon.png")
+      });
+      if(created&&typeof created.catch==="function")created.catch(()=>{});
+    }catch(e){}
+    return;
+  }
   const key=`reverse|${String(result.name).toLowerCase()}|${result.profitRef.toFixed(4)}|${result.bpPrice?.display||""}`;
   if(notifiedDeals.has(key))return;
   notifiedDeals.add(key);
@@ -3140,6 +3217,53 @@ async function refreshItemFromStn(item){
 // Alternates the sites (STN, scrap.tf, STN, scrap.tf, ...) so both are worked
 // through side by side instead of one site being finished before the other
 // starts. Each site keeps its own order.
+// Same, for units that must stay together (an item's forward and reverse checks): the units are
+// alternated between the sites and every unit's checks stay next to each other.
+function interleaveUnits(units){
+  const marked=units.filter(unit=>unit.length).map(unit=>({source:unit[0].source,unit}));
+  return interleaveBySource(marked).flatMap(entry=>entry.unit);
+}
+
+// What a scan queues, from the items found: every item's forward check (buy on the marketplace, sell to a
+// bot on Backpack.tf) is followed at once by its reverse check (buy on Backpack.tf, sell to STN), so
+// an item is fully checked before the next one starts and the sites alternate item by item. Checks
+// done within the last 60 minutes are left out and returned as "already checked".
+function planScanQueue(items,reverseByKey,checkedMap,options={}){
+  const alreadyChecked=[];
+  const units=[];
+  const reverseHandled=new Set();
+  const planReverse=(key,unit)=>{
+    const candidate=reverseByKey.get(key);
+    if(!candidate||reverseHandled.has(key))return;
+    reverseHandled.add(key);
+    const previous=TF2CheckedItems.skipEntry(checkedMap,candidate,Date.now(),"reverse");
+    if(previous)alreadyChecked.push(alreadyCheckedResult(candidate,previous,"reverse"));
+    else unit.push(candidate);
+  };
+  // A scrap.tf item is checked against STN's buy price (buy on scrap.tf, sell to STN), not
+  // against Backpack.tf sell listings.
+  const planScrapToStn=(entry,unit)=>{
+    const candidate={name:entry.name,price:entry.price,stock:entry.stock??null,href:entry.href||"",source:"scrap.tf",scrapValue:entry.scrapValue??null,scrapToStn:true};
+    const previous=TF2CheckedItems.skipEntry(checkedMap,candidate,Date.now(),"reverse");
+    if(previous)alreadyChecked.push(alreadyCheckedResult(candidate,previous,"reverse"));
+    else unit.push(candidate);
+  };
+  for(const entry of items){
+    const unit=[];
+    const previous=TF2CheckedItems.skipEntry(checkedMap,entry);
+    if(previous)alreadyChecked.push(alreadyCheckedResult(entry,previous,"forward"));
+    else unit.push(entry);
+    if(entry.source==="scrap.tf"){
+      if(options.scrapToStn)planScrapToStn(entry,unit);
+    }else planReverse(TF2CheckedItems.keyFor(entry.name),unit);
+    // The forward check goes first and reads what the sell-to-STN check after it needs (STN's page,
+    // and the Backpack.tf sell listings), so those pages are opened once per item.
+    if(unit.length>1&&!unit[0].reverse&&!unit[0].scrapToStn)unit[0]={...unit[0],prefetchStn:true};
+    if(unit.length)units.push(unit);
+  }
+  return {toScan:interleaveUnits(units),alreadyChecked};
+}
+
 function interleaveBySource(items){
   const lanes=new Map();
   for(const item of items){
@@ -3638,7 +3762,8 @@ async function next(){
           name:item.name,
           skipped:true,
           savedCheck:Boolean(item.fromSaved),
-          reverse:Boolean(item.reverse),
+          reverse:Boolean(item.reverse||item.scrapToStn),
+          scrapToStn:Boolean(item.scrapToStn),
           source:item.source==="scrap.tf"?"scrap.tf":"stn",
           reason:`Check failed: ${message}`,
           sourceItem:{name:item.name,price:item.price||"",stock:item.stock??null,href:item.href||"",...(item.reverse?{reverse:true}:{})},
@@ -3703,6 +3828,11 @@ async function nextInner(){
     await processReverseItem(item);
     return;
   }
+  // scrap.tf item: is its price below what STN pays for it (buy on scrap.tf, sell to STN)?
+  if(item.scrapToStn){
+    await processScrapToStnItem(item);
+    return;
+  }
 
   // A saved item is opened on STN first: the price and stock there are what the
   // comparison with Backpack.tf must use, and an item STN no longer stocks
@@ -3763,6 +3893,12 @@ async function nextInner(){
 
   const firstName=item.name;
   await highlightSourceItem(firstName,item.source);
+  // Step 1 of an item that is also checked for selling to STN: STN's item page, read once (what STN
+  // pays and how many more it buys); the sell-to-STN checks that follow reuse it.
+  if(item.prefetchStn){
+    await cachedStnBuyPrice(item);
+    if(!running){scanItemBusy=false;await closeAutomationWindowIfIdle();return}
+  }
   const originalSpec=getBackpackSpec(firstName);
   const namesToTry=[];
   const addName=n=>{
@@ -3799,6 +3935,18 @@ async function nextInner(){
         continue;
       }
 
+      // Step 2: the same stats page also lists the sell listings, which the Backpack.tf -> STN check
+      // needs (only when STN buys more of this item). Read them now instead of loading the page again.
+      if(item.prefetchStn&&item.source==="stn"&&attempt===0){
+        const stnRead=itemData(item.name).stn;
+        if(stnRead?.ok&&stnRead.capacity>0){
+          try{
+            const sellData=await readSellListingsWhenStable(statsTab.id,searchedName,resolved.spec);
+            if(sellData)itemData(item.name).bpSell={data:sellData,url:backpackUrl};
+          }catch(error){console.warn("Could not read the Backpack.tf sell listings:",error)}
+          if(!running)break;
+        }
+      }
       const searchSpec=resolved.spec;
       data=await openAndReadClassifieds(statsTab.id,searchedName,parsePrice(item.price)?.refValue??null);
       if(data?.source==="classifieds"&&data.url){
@@ -3928,31 +4076,20 @@ function startItemScan(m,sendResponse){
         if(Number.isFinite(price)&&(!Number.isFinite(currentPrice)||price<currentPrice))cheapest.set(key,entry);
       }
       const items=[...cheapest.values()];
+      // The Backpack.tf -> STN reverse check is for STN items only: an item that scrap.tf sells cheaper (or
+      // that only scrap.tf lists) is instead checked against STN's buy price (buy on scrap.tf, sell to STN).
+      for(const entry of items){
+        if(entry.source==="scrap.tf")reverseByKey.delete(TF2CheckedItems.keyFor(entry.name));
+      }
       const sources={};
       for(const entry of items)sources[entry.source]=(sources[entry.source]||0)+1;
       // Items checked within the last 60 minutes at the same price are not
       // checked again; they are shown as "Already checked" instead.
       const checkedMap=(await storageGet({[TF2CheckedItems.STORAGE_KEY]:{}}))[TF2CheckedItems.STORAGE_KEY]||{};
-      const toScan=[];
-      const alreadyChecked=[];
-      const reverseHandled=new Set();
-      const planReverse=key=>{
-        const candidate=reverseByKey.get(key);
-        if(!candidate||reverseHandled.has(key))return;
-        reverseHandled.add(key);
-        const previous=TF2CheckedItems.skipEntry(checkedMap,candidate,Date.now(),"reverse");
-        if(previous)alreadyChecked.push(alreadyCheckedResult(candidate,previous,"reverse"));
-        else toScan.push(candidate);
-      };
-      // An item's two directions are queued next to each other, so it is fully
+      // An item's two directions are queued back to back (see planScanQueue), so it is fully
       // checked (and grayed out on the marketplace page) as soon as possible.
-      for(const entry of items){
-        const previous=TF2CheckedItems.skipEntry(checkedMap,entry);
-        if(previous)alreadyChecked.push(alreadyCheckedResult(entry,previous,"forward"));
-        else toScan.push(entry);
-        planReverse(TF2CheckedItems.keyFor(entry.name));
-      }
-      for(const key of reverseByKey.keys())planReverse(key);
+      const scrapToStnCount=noSell?0:items.filter(entry=>entry.source==="scrap.tf").length;
+      const {toScan,alreadyChecked}=planScanQueue(items,reverseByKey,checkedMap,{scrapToStn:!noSell});
       sourceTabsBySource=tabsBySource;
       sourceTabId=tab.id;
       sourceWindowId=tab.windowId;
@@ -3962,8 +4099,9 @@ function startItemScan(m,sendResponse){
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
       }
-      if(reverseByKey.size)sources["stn-reverse"]=reverseByKey.size;
-      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn,offline:offlineScan,noSell}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      scanItemData.clear();
+      if(reverseByKey.size+scrapToStnCount)sources["stn-reverse"]=reverseByKey.size+scrapToStnCount;
+      queue=toScan;scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn,offline:offlineScan,noSell,rounds:Math.max(0,Number(m.rescanRounds)||0)}:null;total=items.length+reverseByKey.size+scrapToStnCount;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources,alreadyChecked:alreadyChecked.length});
       emitAlreadyChecked(alreadyChecked);
@@ -3973,6 +4111,10 @@ function startItemScan(m,sendResponse){
 }
 
 const AUTO_RESCAN_PAUSE_MS=15000;
+// After this many rounds of refresh + PageDown the next round loads the first STN page instead of
+// refreshing (and still presses PageDown), and the count starts again.
+const AUTO_RESCAN_ROUNDS_BEFORE_HOME=3;
+const STN_FIRST_PAGE_URL="https://stntrading.eu/tf2/hats?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1";
 // When nothing new was queued (every item was checked within the last hour) the
 // next round waits longer, so the STN page is not hammered.
 const AUTO_RESCAN_IDLE_PAUSE_MS=120000;
@@ -3988,14 +4130,18 @@ async function autoRescanWait(token,ms){
 }
 
 // A scan of an STN page finished: refresh that page (its own link), press PageDown
-// three times and scan again, until Stop is pressed or another scan is started.
+// three times and scan again, until Stop is pressed or another scan is started. After three
+// such rounds the next one loads the first page of the STN hats listing instead of refreshing,
+// and the count starts over (it is paged down 3 times too, like every other round).
 async function startAutoRescan(context){
   const settings=await storageGet({stnAutoRescan:true});
   if(settings.stnAutoRescan===false||!Number.isInteger(context?.stnTabId))return;
   const token=++autoRescanToken;
+  const roundsDone=Math.max(0,Number(context.rounds)||0);
+  const goHome=roundsDone>=AUTO_RESCAN_ROUNDS_BEFORE_HOME;
   const idle=scanQueuedCount===0;
   const pause=idle?AUTO_RESCAN_IDLE_PAUSE_MS:AUTO_RESCAN_PAUSE_MS;
-  emitTradeAutomationStatus(`Scan finished. Refreshing the STN page and scanning again in ${Math.round(pause/1000)}s${idle?" (everything was checked recently)":""}. Press Stop to end this.`);
+  emitTradeAutomationStatus(`Scan finished. ${goHome?"Going back to the first STN page":"Refreshing the STN page"} and scanning again in ${Math.round(pause/1000)}s${idle?" (everything was checked recently)":""}. Press Stop to end this.`);
   if(!await autoRescanWait(token,pause))return;
   if(running)return;
   const stnTab=await getTabInfo(context.stnTabId);
@@ -4004,11 +4150,12 @@ async function startAutoRescan(context){
     emitTradeAutomationStatus("The STN page is no longer open, so the automatic rescan ended.");
     return;
   }
-  emitTradeAutomationStatus("Refreshing the STN page and pressing PageDown 3 times…");
+  emitTradeAutomationStatus(goHome?"Going back to the first page of the STN hats listing and pressing PageDown 3 times…":`Refreshing the STN page and pressing PageDown 3 times (round ${roundsDone+1} of ${AUTO_RESCAN_ROUNDS_BEFORE_HOME} before going back to the first page)…`);
   try{await updateTab(stnTab.id,{active:true})}catch(error){}
   const watch=watchTabNavigation(stnTab.id);
   try{
-    await reloadTab(stnTab.id);
+    if(goHome)await updateTab(stnTab.id,{url:STN_FIRST_PAGE_URL});
+    else await reloadTab(stnTab.id);
     const deadline=Date.now()+30000;
     while(!watch.complete&&Date.now()<deadline)await sleep(250);
   }finally{watch.stop()}
@@ -4023,7 +4170,7 @@ async function startAutoRescan(context){
   await sleep(2500);
   if(token!==autoRescanToken||!autoRescanContext||running)return;
   const origin=await getTabInfo(context.tabId);
-  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id,offline:context.offline===true,noSell:context.noSell===true},resolve));
+  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id,offline:context.offline===true,noSell:context.noSell===true,rescanRounds:goHome?0:roundsDone+1},resolve));
   if(!result?.ok){
     autoRescanContext=null;
     emitTradeAutomationStatus(`The automatic rescan ended: ${result?.error||"the scan could not start."}`);
@@ -4130,6 +4277,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   if(m.type==="RETRY_ITEM"){
     const item=m.item;
     if(!item?.name){sendResponse({ok:false,error:"Missing item to retry."});return}
+    scanItemData.delete(TF2CheckedItems.keyFor(item.name));
     const wasRunning=running;
     queue.unshift(item);
     total++;

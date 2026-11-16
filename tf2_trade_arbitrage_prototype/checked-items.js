@@ -4,13 +4,13 @@
 // by the lower-case item name) next to the "savedTrades" table and never leaves
 // the browser. An item can be checked in two directions:
 //   forward  - buy on the marketplace (STN or scrap.tf), sell on Backpack.tf
-//   reverse  - buy on Backpack.tf, sell to STN (only for items STN lists)
+//   reverse  - sell to STN: for an STN item buy on Backpack.tf, for a scrap.tf item buy on
+//              scrap.tf (the block's "via" says "scrap.tf" then)
 // Each direction is its own block {price, outcome, note, profitRef, checkedAt,
 // expiresAt}: the price it was checked at and when it may be checked again (60
 // minutes later). A normal scan skips every direction whose block is still fresh
 // and whose marketplace price has not changed. An STN item counts as fully
-// checked only when both directions are fresh; a scrap.tf item only has the
-// forward direction. This file only holds the pure bookkeeping; background.js
+// checked only when both directions are fresh (scrap.tf items too). This file only holds the pure bookkeeping; background.js
 // loads and stores the object.
 //
 // Row shape: {name, source, forward, reverse, price, outcome, note, profitRef,
@@ -45,6 +45,7 @@
       price:String(raw.price||""),
       outcome:String(raw.outcome||"not-good"),
       note:String(raw.note||"").slice(0,200),
+      via:raw.via==="scrap.tf"?"scrap.tf":"",
       profitRef:Number.isFinite(raw.profitRef)?raw.profitRef:null,
       checkedAt:Number(raw.checkedAt)||0,
       expiresAt:Number(raw.expiresAt)
@@ -99,6 +100,7 @@
       price:String(info.price||""),
       outcome:String(info.outcome||"not-good"),
       note:String(info.note||"").slice(0,200),
+      via:info.via==="scrap.tf"?"scrap.tf":"",
       profitRef:Number.isFinite(info.profitRef)?info.profitRef:null,
       checkedAt:now,
       expiresAt:now+TTL_MS
@@ -132,14 +134,13 @@
   }
 
   // How completely an item on the page below is checked. `source` is the site of
-  // the page and `price` its listed price. Only STN items have a reverse
-  // direction, so only they can be half checked: a scrap.tf item is done after
-  // its forward check. `level` is "full", "partial" or "none"; `expiresAt` is
+  // the page and `price` its listed price. An item has two directions (forward and
+  // sell-to-STN), so it is half checked while only one is fresh. `level` is "full", "partial" or "none"; `expiresAt` is
   // when the first of the fresh checks runs out; `done` / `missing` name the
   // directions.
   function status(map,item,now=Date.now()){
     const source=normalizeSource(item?.source);
-    const needed=source==="stn"?["forward","reverse"]:["forward"];
+    const needed=["forward","reverse"];
     const done=needed.filter(direction=>skipEntry(map,item,now,direction));
     const found=blocks(map&&map[keyFor(item?.name)]);
     const level=done.length===needed.length?"full":(done.length?"partial":"none");
