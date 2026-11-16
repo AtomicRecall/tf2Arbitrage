@@ -2280,7 +2280,12 @@ async function verifyProfitableListings(result){
       result.offerChecks.push({...listing,verification:{status:"unverified",reason:"Could not parse this listing's price."}});
       continue;
     }
-    const requestedRef=price.refValue*quantity;
+    // A big buyer may want far more than can be bought: the metal only has to cover the copies
+    // that are in stock (the trade is limited to the stock anyway), so a trader who asks for 50
+    // is checked for the 3 that can actually be sold to them, not for all 50.
+    const stockCapQuantity=Number.isFinite(tradeLimit)&&tradeLimit-1>=1?tradeLimit-1:Infinity;
+    const checkQuantity=Math.min(quantity,stockCapQuantity);
+    const requestedRef=price.refValue*checkQuantity;
     const url=String(listing.tradeUrl||"").trim();
     // The trader wants `quantity` of this item (1 when their description does
     // not mention stock). The description's own stock already counts copies the
@@ -2300,7 +2305,7 @@ async function verifyProfitableListings(result){
     if(url&&inspectionCache.has(inspectionKey)){
       inspection=inspectionCache.get(inspectionKey);
     }else{
-      inspection=await inspectListingTradeOffer(listing,requestedRef,itemCheck,{keys:price.keys*quantity,rate:keyRate});
+      inspection=await inspectListingTradeOffer(listing,requestedRef,itemCheck,{keys:price.keys*checkQuantity,rate:keyRate});
       if(url)inspectionCache.set(inspectionKey,inspection);
     }
     if(inspection.status==="checked"&&inspection.badTrader){
@@ -2324,9 +2329,10 @@ async function verifyProfitableListings(result){
     let affordableQuantity=0;
     const offeredRef=Number(inspection.offeredRef);
     if(inspection.status==="checked"&&Number.isFinite(offeredRef)){
+      // Whatever the trader's metal covers counts: it is how many items they can pay for.
       affordableQuantity=price.refValue>0
-        ?Math.min(quantity,Math.floor((offeredRef+0.0001)/price.refValue))
-        :quantity;
+        ?Math.min(checkQuantity,Math.floor((offeredRef+0.0001)/price.refValue))
+        :checkQuantity;
       while(affordableQuantity>0&&offeredRef+0.0001<price.refValue*affordableQuantity){
         affordableQuantity--;
       }
@@ -2353,6 +2359,7 @@ async function verifyProfitableListings(result){
             ?`Trader inventory supports ${affordableQuantity} of ${quantity} requested items at ${price.refValue.toFixed(2)} ref each.`
             :`Trader inventory contains enough metal for ${quantity} item${quantity===1?"":"s"} at ${price.refValue.toFixed(2)} ref each.`
           :`Trader inventory has less metal than the single-item Buy Order price of ${price.refValue.toFixed(2)} ref.`)
+          +(checkQuantity<quantity?` Metal was only checked for the ${checkQuantity} item${checkQuantity===1?"":"s"} that can be bought (the trader asks for ${quantity}).`:"")
           +(inspection.keysUsed>0?` The price's keys are paid with the trader's own keys (${inspection.keysUsed} of ${inspection.keysNeeded} counted); metal is only needed for the rest.`:"")
       }
       :{...inspection,requiredRef:requestedRef,unitPriceRef:price.refValue,quantity,requestedQuantity:quantity};
@@ -3264,7 +3271,9 @@ function notifyReverseHit(result){
 
 // Opens the item's STN page (https://stntrading.eu/item/tf2/<name>) in the
 // scanner window and reads its current price and stock.
-async function refreshItemFromStn(item){
+// `alsoReadSell` also reads the page's "Sell it for" box in the same visit (when it shows up soon),
+// so the sell-to-STN check that follows does not open the page a second time.
+async function refreshItemFromStn(item,alsoReadSell=false){
   const url=marketplaceUrl(item.name);
   let tab=null;
   try{
@@ -3286,6 +3295,21 @@ async function refreshItemFromStn(item){
     }
     if(!page||page.status!=="ready")return {ok:false,reason:page?.reason||"Could not read the price from the STN item page."};
     if(page.stock<=0)return {ok:false,stock:0,reason:`STN has none in stock right now (${page.price}).`};
+    if(alsoReadSell){
+      try{
+        let sell=null;
+        const sellDeadline=Date.now()+6000;
+        while(running&&Date.now()<sellDeadline){
+          try{sell=await msgTab(tab.id,{type:"READ_STN_SELL_PAGE"})}catch(error){sell=null}
+          if(sell?.status==="ready")break;
+          await sleep(500);
+        }
+        if(sell?.status==="ready"){
+          const entry=itemData(item.name);
+          if(!entry.stn)entry.stn={ok:true,price:sell.price,capacity:sell.capacity};
+        }
+      }catch(error){}
+    }
     return {ok:true,price:page.price,stock:page.stock};
   }catch(error){
     return {ok:false,reason:`Could not open the STN item page: ${error?.message||error}`};
@@ -3972,6 +3996,50 @@ async function nextInner(){
       item.scrapValue=stn.scrapValue??item.scrapValue;
       item.href=stn.href||item.href;
     }
+  }
+
+  // An STN item is only worth a Backpack.tf lookup when STN has it in stock right now. The listing
+  // card the item was read from can be out of date, so its own STN page is opened first (the page
+  // also gives the current price). A saved item already did this above.
+  if(!item.fromSaved&&item.source!=="scrap.tf"){
+    emitTradeAutomationStatus(`Checking ${item.name}: reading its STN page for stock before looking at Backpack.tf…`);
+    let stn=await refreshItemFromStn(item,item.prefetchStn===true);
+    if(!stn.ok&&running&&SAVED_REFRESH_RETRY_REASON.test(String(stn.reason||""))){
+      emitTradeAutomationStatus(`${item.name}: ${stn.reason} Trying STN once more…`);
+      await sleep(randomDelay(3000,5000));
+      if(running)stn=await refreshItemFromStn(item,item.prefetchStn===true);
+    }
+    if(!running){scanItemBusy=false;await closeAutomationWindowIfIdle();return}
+    if(!stn.ok){
+      emitTradeAutomationStatus(`${item.name}: ${stn.reason}`);
+      if(SAVED_REFRESH_RETRY_REASON.test(String(stn.reason||""))){
+        savedRefreshFailures++;
+        if(savedRefreshFailures>=3){
+          savedRefreshFailures=0;
+          emitTradeAutomationStatus(`STN did not answer for 3 items in a row. Pausing for ${Math.round(SAVED_BACKOFF_MS/1000)} seconds before going on.`);
+          const until=Date.now()+SAVED_BACKOFF_MS;
+          while(running&&Date.now()<until)await sleep(1000);
+        }
+      }
+      if(!running){scanItemBusy=false;await closeAutomationWindowIfIdle();return}
+      await finish({
+        name:item.name,
+        skipped:true,
+        source:"stn",
+        reason:stn.reason,
+        sourceItem:{name:item.name,price:item.price||"",stock:stn.stock??null,href:marketplaceUrl(item.name)},
+        attempts:[]
+      });
+      return;
+    }
+    savedRefreshFailures=0;
+    // The page's price is the one that counts; the card's text is kept when it is the same amount.
+    const pagePrice=parsePrice(stn.price)?.refValue,cardPrice=parsePrice(item.price)?.refValue;
+    if(Number.isFinite(pagePrice)&&pagePrice!==cardPrice){
+      emitTradeAutomationStatus(`${item.name}: STN now asks ${stn.price} (the list showed ${item.price}).`);
+      item.price=stn.price;
+    }
+    item.stock=stn.stock;
   }
 
   const firstName=item.name;

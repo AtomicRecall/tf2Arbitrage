@@ -1,6 +1,11 @@
-# TF2 Metal Trader v0.9.130
+# TF2 Metal Trader v0.9.131
 
 Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam trade offers.
+
+## v0.9.131 — a trader's metal counts even when it is less than asked for
+
+- The metal availability test (used by the arbitrage scanner) no longer fails when adding metal stops part-way. Whatever metal was staged is reported, so the scanner can work out how many items the trader can pay for. It is only inconclusive when nothing at all could be staged.
+- The result now says `partial: true` when the staged metal fell short of the requested amount because adding failed.
 
 ## v0.9.130 — craftable and Non-Craftable copies are not mixed up
 

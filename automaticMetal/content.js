@@ -1183,7 +1183,10 @@
         items: 0
       };
     }
-    if (addError && availableScrap < targetScrap) {
+    // Less metal than asked for is an answer, not a failure: the caller turns it into the number
+    // of items the trader can pay for. The check is only inconclusive when adding metal failed
+    // and nothing at all could be staged.
+    if (addError && availableScrap < targetScrap && availableRef <= 0) {
       throw new Error(`Metal availability test could not finish: ${addError.message || addError}`);
     }
     return {
@@ -1194,6 +1197,7 @@
       keysUsed,
       keysNeeded,
       ownedCheck,
+      partial: Boolean(addError) && availableScrap < targetScrap,
       sufficient: availableScrap >= targetScrap,
       items: counts.refined + counts.reclaimed + counts.scrap
     };

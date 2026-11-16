@@ -762,14 +762,17 @@
       if(!isSell&&humanSeller)continue;
 
       // ONLY treat a listing as bot-managed when Backpack.tf's actual green
-      // buyout button explicitly says "Please only offer the buyout.".
+      // buyout button's whole title reads "This listing is managed by a user agent.
+      // Click to open a Trade Offer. Please only offer the buyout.".
       // This is intentionally strict: negotiation-enabled listings are real
       // player/manual listings for this scanner and must be ignored.
       const buyoutButton=listing.querySelector(
         '.listing-buttons .btn.btn-bottom.btn-xs.btn-success[title]'
       );
       const buttonTitle=String(buyoutButton?.getAttribute("title")||"").trim();
-      const isBotBuyout=buttonTitle.includes("Please only offer the buyout.");
+      // The title must read exactly this (extra spaces are ignored); a title that only
+      // contains "Please only offer the buyout." is not enough.
+      const isBotBuyout=buttonTitle.replace(/\s+/g," ")==="This listing is managed by a user agent. Click to open a Trade Offer. Please only offer the buyout.";
       const negotiationAllowed=buttonTitle.includes("Negotiation is allowed.");
       const botLike=isSell?(!humanSeller&&!negotiationAllowed):(isBotBuyout&&!negotiationAllowed);
       if(!isSell&&!botLike)continue;

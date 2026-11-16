@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.146
+Current version 0.7.149
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,15 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.149 changes:
+- STN stock first. Before an STN item is looked up on Backpack.tf, its own STN page (stntrading.eu/item/tf2/<name>) is opened and its stock and price are read. An item STN has none of is skipped there ("STN has none in stock right now") without opening Backpack.tf, and the current STN price replaces the list's price when they differ. A page that does not load is tried once more, and three misses in a row pause the scan for 45 seconds. When the item is also checked for selling to STN, the same visit reads STN's buy price, so the page is not opened twice.
+
+V0.7.148 changes:
+- Traders who want many items. The metal check no longer asks a trader for the metal of everything they want. It asks for the copies that can actually be bought (the STN / scrap.tf stock), and a trader whose metal covers only some of those counts for that many items instead of being reported as having no metal. The "already holds enough copies" check still uses the full number they want.
+
+V0.7.147 changes:
+- Stricter bot check. A Buy Order only counts as a bot's when the title of its green button reads exactly "This listing is managed by a user agent. Click to open a Trade Offer. Please only offer the buyout." (extra spaces are ignored). A title that merely contains "Please only offer the buyout." no longer counts. The "Negotiation is allowed." rejection is unchanged.
 
 V0.7.146 changes:
 - Craftable / Non-Craftable. STN names an uncraftable item "Non-Craftable <name>" (for example "Non-Craftable Ap-Sap") and that name is already compared with Backpack.tf's Non-Craftable page and Non-Craftable buy orders (craftable=-1), so those items are scanned for arbitrage like any other. Every other STN / scrap.tf item is assumed craftable.

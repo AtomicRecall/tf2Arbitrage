@@ -1,7 +1,7 @@
 ﻿{
   "manifest_version": 3,
   "name": "TF2 Metal Trader",
-  "version": "0.9.130",
+  "version": "0.9.131",
   "description": "Steam trade automation with safe arbitrage metal availability testing.",
   "permissions": [],
   "host_permissions": [
