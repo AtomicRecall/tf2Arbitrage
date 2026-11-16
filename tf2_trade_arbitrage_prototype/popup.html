@@ -56,11 +56,27 @@
     <div id="macStatus" class="api-key-status" role="status" aria-live="polite">Not configured.</div>
   </details>
   <div class="hint">STN purchase completion is verified through the Steam Web API for the exact offer ID. Only trade_offer_state 3 (Accepted) counts as complete; state 9 (CreatedNeedsConfirmation) and state 11 (InEscrow) do not. Approve mobile confirmations yourself. Acceptance of outgoing bot offers is not tracked.</div>
-  <button id="scan" title="Reads every stntrading.eu and scrap.tf page open in this window. STN hats are checked both ways: buy on STN and sell on Backpack.tf, and buy on Backpack.tf and sell to STN. scrap.tf hats are checked buying on scrap.tf.">Scan STN + scrap.tf pages</button>
-  <button id="scanStn" class="secondary-scan" title="Same scan, but only the stntrading.eu page(s) open in this window (both directions)">Scan STN only</button>
-  <button id="scanScrap" class="secondary-scan" title="Same scan, but only the scrap.tf Buy Hats page(s) open in this window">Scan scrap.tf only</button>
-  <button id="scanOffline" class="secondary-scan" title="Checks every stntrading.eu and scrap.tf page open in this window exactly like 'Scan STN + scrap.tf pages', but offline: it only checks. Good Trades are saved, but nothing is bought and no offer is sent, whatever the automatic-trading checkbox says.">Scan offline (check only, save Good Trades, no trading)</button>
-  <button id="scanReverse" class="secondary-scan" title="Reads the stntrading.eu hats page open in this window, then for each hat checks what STN pays for it (its item page, 'Sell it for') against the cheapest sell listings on Backpack.tf. Nothing is bought automatically.">Scan STN buy prices (buy on Backpack.tf, sell to STN)</button>
+  <div class="scan-group">
+    <button id="scan" title="Reads the ticked marketplace pages open in this window. Every STN hat is checked both ways: buy on STN and sell on Backpack.tf, and buy on Backpack.tf and sell to STN. scrap.tf hats are checked buying on scrap.tf and selling on Backpack.tf.">Scan Pages</button>
+    <div class="scan-sites"><span>Look at:</span>
+      <label><input id="scanPagesStn" type="checkbox" checked> stntrading.eu</label>
+      <label><input id="scanPagesScrap" type="checkbox" checked> scrap.tf</label>
+    </div>
+  </div>
+  <div class="scan-group">
+    <button id="scanNoSell" title="Same as Scan Pages, but nothing is sold back to stntrading.eu: it only checks buying an item from the marketplace and selling it to a bot on Backpack.tf.">Scan No Sell</button>
+    <div class="scan-sites"><span>Look at:</span>
+      <label><input id="noSellStn" type="checkbox" checked> stntrading.eu</label>
+      <label><input id="noSellScrap" type="checkbox" checked> scrap.tf</label>
+    </div>
+  </div>
+  <div class="scan-group">
+    <button id="scanOffline" title="Only checks buying from the marketplace and selling on Backpack.tf, and does not trade: every Good Trade found is just saved to the saved items. Nothing is bought and no offer is sent, whatever the automatic-trading checkbox says.">Scan Offline</button>
+    <div class="scan-sites"><span>Look at:</span>
+      <label><input id="offlineStn" type="checkbox" checked> stntrading.eu</label>
+      <label><input id="offlineScrap" type="checkbox" checked> scrap.tf</label>
+    </div>
+  </div>
   <button id="stop" class="secondary">Stop</button>
   <label class="automation-toggle">
     <input id="scrapSkipCraft" type="checkbox" checked>

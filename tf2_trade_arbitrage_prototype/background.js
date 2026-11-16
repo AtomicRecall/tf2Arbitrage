@@ -3871,7 +3871,7 @@ function startItemScan(m,sendResponse){
       // Every STN and scrap.tf page open in this window is read (the active tab
       // first), so both marketplaces are checked in one scan.
       // "sites" limits the scan to one marketplace ("stn" or "scrap.tf"); anything
-      // else scans both. STN items are checked in both directions.
+      // else scans both. STN items are checked in both directions (unless m.noSell).
       const sites=m.sites==="stn"||m.sites==="scrap.tf"?m.sites:"all";
       const marketplacePage=sites==="stn"?/^https:\/\/(?:www\.)?stntrading\.eu\//i
         :sites==="scrap.tf"?/^https:\/\/(?:www\.)?scrap\.tf\//i
@@ -3904,8 +3904,12 @@ function startItemScan(m,sendResponse){
       // Every STN item is also checked the other way round: buy on Backpack.tf and
       // sell to STN (see processReverseItem). That is not tied to the cheaper-site
       // choice below, because STN pays for the item whichever site sells it cheaper.
+      // "Scan No Sell" and the offline scan leave that direction out: they only look at buying
+      // from the marketplace and selling to a bot on Backpack.tf.
+      const noSell=m.noSell===true||m.offline===true;
       const reverseByKey=new Map();
       for(const entry of found){
+        if(noSell)break;
         if(entry.source!=="stn")continue;
         const reverseKey=TF2CheckedItems.keyFor(entry.name);
         if(!reverseKey||reverseByKey.has(reverseKey))continue;
@@ -3959,11 +3963,11 @@ function startItemScan(m,sendResponse){
         storageSet({tradeAutomationEnabled});
       }
       if(reverseByKey.size)sources["stn-reverse"]=reverseByKey.size;
-      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn,offline:offlineScan}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
+      queue=interleaveBySource(toScan);scanQueuedCount=queue.length;autoRescanContext=tabsBySource.stn!==undefined?{tabId:tab.id,sites,stnTabId:tabsBySource.stn,offline:offlineScan,noSell}:null;total=items.length+reverseByKey.size;running=true;results=[...alreadyChecked];checked=results.length;notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked,total,queueLength:queue.length,lastResult:null,finished:false});
       sendResponse({ok:true,total,sources,alreadyChecked:alreadyChecked.length});
       emitAlreadyChecked(alreadyChecked);
-      emitTradeAutomationStatus(offlineScan?"Offline scan: items are only checked and Good Trades are saved. Nothing is bought and no offer is sent.":tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
+      emitTradeAutomationStatus(offlineScan?"Offline scan: items are only checked (buy on the marketplace, sell on Backpack.tf) and Good Trades are saved. Nothing is bought and no offer is sent.":noSell?"Scan No Sell: only buying from the marketplace and selling on Backpack.tf is checked; selling to STN is left out. "+(tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Automatic trade execution is disabled."):tradeAutomationEnabled?"Automatic trade execution is enabled for price-profitable deals.":"Scanning with automatic trade execution disabled.");
     next();
   }).catch(error=>sendResponse({ok:false,error:error?.message||String(error)}));
 }
@@ -4019,7 +4023,7 @@ async function startAutoRescan(context){
   await sleep(2500);
   if(token!==autoRescanToken||!autoRescanContext||running)return;
   const origin=await getTabInfo(context.tabId);
-  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id,offline:context.offline===true},resolve));
+  const result=await new Promise(resolve=>startItemScan({type:"START_SCAN",sites:context.sites,keyRate,tabId:origin?context.tabId:stnTab.id,offline:context.offline===true,noSell:context.noSell===true},resolve));
   if(!result?.ok){
     autoRescanContext=null;
     emitTradeAutomationStatus(`The automatic rescan ended: ${result?.error||"the scan could not start."}`);

@@ -79,3 +79,8 @@ button.btn-busy{cursor:progress}
 button.btn-busy:after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);transform:translateX(-100%);animation:btn-sweep .8s linear infinite;pointer-events:none}
 @keyframes btn-sweep{to{transform:translateX(320%)}}
 @media (prefers-reduced-motion:reduce){button.btn-pulse,button.btn-busy:after{animation:none}}
+.scan-group{margin:0 0 8px}
+.scan-group button{margin-bottom:3px}
+.scan-sites{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;color:#f0d3a9;font-size:11px}
+.scan-sites label{display:flex;align-items:center;gap:4px;margin:0;color:#f0d3a9;font-size:11px}
+.scan-sites input{width:auto;flex:none;margin:0;accent-color:#d38b32}

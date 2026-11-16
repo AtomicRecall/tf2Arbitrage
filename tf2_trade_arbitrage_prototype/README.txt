@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.136
+Current version 0.7.138
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,16 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.138 changes:
+- The sounds are now equally loud. They differed a lot in the files themselves, which made some look like they ignored the volume slider (the slider was applied to all of them): middle1.wav was about 14 dB louder than hit.mp3 and Item_metal_pot_drop.wav about 5 dB louder, while middle2.wav was about 17 dB quieter. middle1.wav, middle2.wav and Item_metal_pot_drop.wav were rebalanced to hit.mp3's loudness (peaks kept below -5 dBFS); hit.mp3 is unchanged. The slider still scales them all the same way.
+
+V0.7.137 changes:
+- The scan buttons are now three, each with its own pair of checkboxes (stntrading.eu and scrap.tf, both ticked by default, remembered):
+  * Scan Pages: checks buying and selling on stntrading.eu both ways (buy on STN and sell on Backpack.tf, and buy on Backpack.tf and sell to STN) and scrap.tf buying; trades follow the automatic-trading checkbox.
+  * Scan No Sell: the same, but nothing is sold back to stntrading.eu. It only checks buying from the marketplace and selling to a bot on Backpack.tf.
+  * Scan Offline: like Scan No Sell, but it never trades: Good Trades are only saved to the saved items.
+  The separate Scan STN only, Scan scrap.tf only and Scan STN buy prices buttons are gone (the checkboxes and Scan Pages replace them). With no box ticked next to a button, it asks you to tick one.
 
 V0.7.136 changes:
 - New button "Scan offline (check only, save Good Trades, no trading)". It scans the STN and scrap.tf pages open in the window exactly like the normal scan, but only checks: every Good Trade is saved to the saved items, and nothing is bought and no offer is sent, whatever the automatic-trading checkbox says (the checkbox itself is not changed). The STN auto rescan keeps running offline too, until Stop.

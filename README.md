@@ -110,12 +110,14 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
 
 1. Open **`stntrading.eu`** (the hats listing) and/or **`scrap.tf/buy/hats`** in the same window
    (scrap.tf needs you signed in).
-2. Press **Scan STN + scrap.tf pages**. Every STN and scrap.tf page open in the window is read, and
+2. Press **Scan Pages**. Every STN and scrap.tf page open in the window is read, and
    the two sites are checked alternately. Every STN hat is checked **both ways**: buy on STN and sell
    on Backpack.tf, and buy on Backpack.tf and sell to STN (see the reverse scan below). scrap.tf hats are
-   checked buying on scrap.tf. **Scan STN only** and **Scan scrap.tf only** run the same scan on just that
-   site's page(s). **Scan offline** is the same scan as the first button, but it only checks: Good Trades
-   are saved (see *Saved Good Trades*), and nothing is bought and no offer is sent, whatever the
+   checked buying on scrap.tf. Under each scan button are two checkboxes,
+   stntrading.eu and scrap.tf (both ticked by default), choosing which site's page(s) that button reads.
+   **Scan No Sell** is the same scan without the "sell to STN" direction: it only checks buying from the
+   marketplace and selling to a bot on Backpack.tf. **Scan Offline** does that too, but only checks: Good
+   Trades are saved (see *Saved Good Trades*), and nothing is bought and no offer is sent, whatever the
    automatic-trading checkbox says. A separate **TF2 Arbitrage Scanner** window opens for the
    Backpack.tf and Steam pages and closes when the work is done. Keep it open and visible.
 3. Watch the result tabs:
@@ -138,7 +140,7 @@ sends offers using hats you already own.
 
 ### Reverse scan: buy on Backpack.tf, sell to STN
 
-**Scan STN buy prices** goes the other way. For each hat on the open STN hats page it reads what STN pays
+The "sell to STN" direction of **Scan Pages** (left out by Scan No Sell and Scan Offline) goes the other way. For each hat on the open STN hats page it reads what STN pays
 (the "Sell it for" box on the hat's own STN page, plus how many more STN will buy) and compares it with the
 cheapest bot sell listing on Backpack.tf. Hats where Backpack.tf is at least 0.05 ref cheaper land in the
 **Sell to STN** tab with a notification. This side is report-only: nothing is bought automatically.

@@ -7,8 +7,7 @@ const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeV
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
-const scanOffline=$("scanOffline"),scanReverse=$("scanReverse"),tabReverse=$("tabReverse");
-const scanStn=$("scanStn"),scanScrap=$("scanScrap");
+const scanNoSell=$("scanNoSell"),scanOffline=$("scanOffline"),tabReverse=$("tabReverse");
 const tabs=[...document.querySelectorAll(".tab")];
 const tabAll=$("tabAll"),tabFound=$("tabFound"),tabDeals=$("tabDeals"),tabUnverified=$("tabUnverified"),tabNotFound=$("tabNotFound"),tabDismissed=$("tabDismissed"),tabTraders=$("tabTraders");
 let activeFilter="all";
@@ -585,10 +584,40 @@ volume.oninput=()=>{
   send({type:"SET_VOLUME",volume:v/100});
 };
 
-scan.onclick=()=>startScan("START_SCAN",{sites:"all"});
-scanStn.onclick=()=>startScan("START_SCAN",{sites:"stn"});
-scanScrap.onclick=()=>startScan("START_SCAN",{sites:"scrap.tf"});
-scanOffline.onclick=()=>clickFeedback(scanOffline,startScan("START_SCAN",{sites:"all",offline:true}));
+// The three scan buttons each have their own pair of site checkboxes (both ticked by default); the
+// choice is remembered.
+const SCAN_SITE_BOXES={
+  scan:{stn:$("scanPagesStn"),scrap:$("scanPagesScrap")},
+  scanNoSell:{stn:$("noSellStn"),scrap:$("noSellScrap")},
+  scanOffline:{stn:$("offlineStn"),scrap:$("offlineScrap")}
+};
+api.storage.local.get({scanSiteChoices:{}},v=>{
+  const saved=v.scanSiteChoices||{};
+  for(const [mode,boxes] of Object.entries(SCAN_SITE_BOXES)){
+    if(saved[mode]){boxes.stn.checked=saved[mode].stn!==false;boxes.scrap.checked=saved[mode].scrap!==false}
+  }
+});
+for(const boxes of Object.values(SCAN_SITE_BOXES)){
+  for(const box of [boxes.stn,boxes.scrap]){
+    box.onchange=()=>{
+      const choices={};
+      for(const [mode,pair] of Object.entries(SCAN_SITE_BOXES))choices[mode]={stn:pair.stn.checked,scrap:pair.scrap.checked};
+      storageSetLocal({scanSiteChoices:choices}).catch(()=>{});
+    };
+  }
+}
+function sitesFor(mode){
+  const {stn,scrap}=SCAN_SITE_BOXES[mode];
+  return stn.checked&&scrap.checked?"all":stn.checked?"stn":scrap.checked?"scrap.tf":null;
+}
+function scanClicked(button,mode,extra={}){
+  const sites=sitesFor(mode);
+  if(!sites){status.textContent="Tick at least one website (stntrading.eu or scrap.tf) next to this button.";return}
+  clickFeedback(button,startScan("START_SCAN",{...extra,sites}));
+}
+scan.onclick=()=>scanClicked(scan,"scan");
+scanNoSell.onclick=()=>scanClicked(scanNoSell,"scanNoSell",{noSell:true});
+scanOffline.onclick=()=>scanClicked(scanOffline,"scanOffline",{offline:true});
 // Click feedback done in the popup itself: a pulse ring right after the click and, while the
 // request is being answered, a light sweep across the button.
 function clickFeedback(button,work){
@@ -601,7 +630,6 @@ function clickFeedback(button,work){
   Promise.resolve(work).catch(()=>{}).finally(()=>setTimeout(()=>button.classList.remove("btn-busy"),350));
 }
 scanSaved.onclick=()=>clickFeedback(scanSaved,startScan("START_SAVED_SCAN"));
-scanReverse.onclick=()=>startScan("START_REVERSE_SCAN");
 async function startScan(type,extra={}){
   api.storage.local.set({keyRate:+rate.value||63});
   const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
