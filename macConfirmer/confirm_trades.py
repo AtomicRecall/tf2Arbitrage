@@ -28,6 +28,15 @@ import subprocess
 import sys
 import time
 
+# How far (in screen points) the pointer may be from where the script put it before the run
+# stops because "the user grabbed the mouse". A small nudge of the mouse is allowed: a stray
+# bump, or macOS / iPhone Mirroring shifting the pointer a little, no longer stops it.
+# `--pointer-tolerance` changes it.
+POINTER_TOLERANCE = 60
+# When the pointer is further away than that, the script puts it back and looks again this
+# many times (a short disturbance fixes itself); it only stops if it is still away every time.
+POINTER_RECHECKS = 3
+
 # Pointer positions measured with `cliclick p`.
 TRADE_OFFER = (1308, 578)
 CONFIRM_BUTTON = (1315, 911)
@@ -174,12 +183,19 @@ def click_checked(clicker, target, what, check_focus, spread, repeat=True):
         focus_mirroring()
         if not mirroring_is_frontmost():
             raise RuntimeError(f"{MIRRORING_APP} is no longer the front app; stopping before clicking {what}.")
-    clicker.move(x, y)
-    time.sleep(random.uniform(0.15, 0.4))
-    # If the pointer is not where we just put it, the user grabbed the mouse.
-    position = clicker.pointer()
-    if position and (abs(position[0] - x) > 6 or abs(position[1] - y) > 6):
-        raise RuntimeError(f"Pointer moved away from {what} ({position} instead of {(x, y)}); stopping.")
+    # If the pointer stays far from where we put it, the user grabbed the mouse. A small
+    # difference is ignored, and a bigger one gets a few chances to fix itself first.
+    for attempt in range(1, POINTER_RECHECKS + 1):
+        clicker.move(x, y)
+        time.sleep(random.uniform(0.15, 0.4))
+        position = clicker.pointer()
+        if not position or (abs(position[0] - x) <= POINTER_TOLERANCE and abs(position[1] - y) <= POINTER_TOLERANCE):
+            break
+        if attempt == POINTER_RECHECKS:
+            raise RuntimeError(f"Pointer moved away from {what} ({position} instead of {(x, y)}, "
+                               f"more than {POINTER_TOLERANCE} points off {POINTER_RECHECKS} times in a row); stopping.")
+        print(f"  pointer is at {position}, not near {x},{y}; putting it back ({attempt}/{POINTER_RECHECKS - 1})")
+        time.sleep(0.4)
     print(f"  clicking {what} at {x},{y}")
     clicker.click(x, y, repeat)
 
@@ -276,7 +292,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
     if not dry_run:
         focus_mirroring()
     if countdown:
-        print(f"Starting in {countdown}s. Do not touch the mouse; move it to stop.")
+        print(f"Starting in {countdown}s. A small nudge of the mouse is fine; move it well away to stop.")
         time.sleep(countdown)
 
     if skip_retry:
@@ -305,7 +321,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
 
 
 def main():
-    global WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET, CLICK_REPEAT_MS
+    global WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET, CLICK_REPEAT_MS, POINTER_TOLERANCE
     parser = argparse.ArgumentParser(description="Accept Steam mobile trade confirmations via iPhone Mirroring.")
     parser.add_argument("count", type=int, help=f"how many trades to accept (1-{MAX_TRADES_PER_RUN})")
     parser.add_argument("--dry-run", action="store_true", help="print the actions without clicking anything")
@@ -324,7 +340,10 @@ def main():
                         help=f"pixels below (+) or above (-) the trade offer where the refresh happens (default {REFRESH_Y_OFFSET})")
     parser.add_argument("--click-repeat-ms", type=int, default=CLICK_REPEAT_MS,
                         help=f"send every click twice, this many ms apart; 0 = single click (default {CLICK_REPEAT_MS})")
+    parser.add_argument("--pointer-tolerance", type=int, default=POINTER_TOLERANCE,
+                        help=f"how far (screen points) the mouse may be moved before the run stops (default {POINTER_TOLERANCE})")
     args = parser.parse_args()
+    POINTER_TOLERANCE = max(6, args.pointer_tolerance)
     WHEEL_EVENTS, WHEEL_LINES, REFRESH_Y_OFFSET = args.wheel_events, args.wheel_lines, args.refresh_y_offset
     CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
 

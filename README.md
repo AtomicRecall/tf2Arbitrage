@@ -274,6 +274,11 @@ When the page is already showing at the first check, no retry click is made. At 
 clicking for ever. Without a saved spot (or when the screen cannot be read) the check cannot be done, so the three
 retry clicks are made once per run.
 
+**Moving the mouse.** Before every click the confirmer reads where the pointer is. You may nudge the mouse a
+little: only a pointer more than 60 screen points away from where the script put it counts as "you grabbed the
+mouse", and even then the script puts it back and looks again (3 tries) before stopping, so a stray bump or a
+one-off shift by macOS / iPhone Mirroring no longer ends the run. `--pointer-tolerance N` changes the 60.
+
 ```bash
 python3 macConfirmer/confirm_server.py --pick-phone-spot        # put the mouse on the spot within 5 s; the phone must show the confirmations page
 python3 macConfirmer/confirm_server.py --phone-spot 1308,578    # or give the position yourself (add --phone-color R,G,B to give the colour too)

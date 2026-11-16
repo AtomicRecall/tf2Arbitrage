@@ -443,6 +443,8 @@ def main():
                         help=f"with --pick-phone-spot / --phone-spot: how far each of R, G and B may differ (default {phone_state.TOLERANCE})")
     parser.add_argument("--check-phone", action="store_true", help="look at the saved spot now, print what it shows and exit")
     parser.add_argument("--no-phone-check", action="store_true", help="always send the 'lock your iPhone' notification, without looking at the spot")
+    parser.add_argument("--pointer-tolerance", type=int, default=confirm_trades.POINTER_TOLERANCE,
+                        help=f"how far (screen points) you may move the mouse before a run stops (default {confirm_trades.POINTER_TOLERANCE})")
     parser.add_argument("--retry-rounds", type=int, default=confirm_trades.MAX_RETRY_ROUNDS,
                         help="with a saved phone spot: at most this many rounds of the three retry clicks, each followed by a "
                              "check, before the run fails and the server pauses (default %(default)s)")
@@ -460,6 +462,7 @@ def main():
     confirm_trades.REFRESH_Y_OFFSET = args.refresh_y_offset
     confirm_trades.CLICK_REPEAT_MS = max(0, args.click_repeat_ms)
     confirm_trades.MAX_RETRY_ROUNDS = max(1, args.retry_rounds)
+    confirm_trades.POINTER_TOLERANCE = max(6, args.pointer_tolerance)
 
     if args.pick_phone_spot or args.phone_spot or args.check_phone:
         try:
