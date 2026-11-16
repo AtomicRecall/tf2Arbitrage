@@ -654,8 +654,12 @@
       // in addition to the image list above (Steam serves several images for
       // the same item).
       const blockedWeaponNamePattern = /\bfish\s*cake\b/i;
-      const candidateNames = (candidate) => {
-        const names = [];
+      // Killstreak weapons (Killstreak / Specialized Killstreak / Professional Killstreak, also
+      // Strange ones) are valuable and must never be handed over as a half-scrap weapon. Steam shows
+      // the tier in the item's name ("Killstreak Scattergun") and in its description lines
+      // ("Killstreaks Active", "Sheen: ...", "Killstreaker: ..."), so both are checked.
+      const killstreakPattern = /\bkillstreak(?:s|er)?\b|\bsheen\s*:/i;
+      const candidateSources = (candidate) => {
         const assetId = String(candidate.id || "").match(/(\d+)$/)?.[1] || "";
         const sources = [candidate.rgItem];
         try {
@@ -663,8 +667,31 @@
           const inventoryData = user?.getInventory?.(440, "2");
           if (assetId && inventoryData?.rgInventory?.[assetId]) sources.push(inventoryData.rgInventory[assetId]);
         } catch (_) {}
-        for (const source of sources) {
-          if (!source) continue;
+        return sources.filter(Boolean);
+      };
+      const candidateTexts = (candidate) => {
+        const texts = [];
+        for (const source of candidateSources(candidate)) {
+          texts.push(source.name, source.market_name, source.market_hash_name, source.type);
+          for (const key of ["descriptions", "owner_descriptions", "fraudwarnings"]) {
+            const lines = source[key];
+            if (!Array.isArray(lines)) continue;
+            for (const line of lines) texts.push(typeof line === "string" ? line : line?.value);
+          }
+          if (Array.isArray(source.tags)) {
+            for (const tag of source.tags) texts.push(tag?.name, tag?.localized_tag_name, tag?.internal_name);
+          }
+        }
+        for (const image of candidate.querySelectorAll("img")) {
+          texts.push(image.getAttribute("alt"), image.getAttribute("title"));
+        }
+        texts.push(candidate.getAttribute("title"), candidate.getAttribute("data-name"));
+        return texts.filter(value => typeof value === "string" && value.trim());
+      };
+      const isKillstreakCandidate = (candidate) => candidateTexts(candidate).some(text => killstreakPattern.test(text));
+      const candidateNames = (candidate) => {
+        const names = [];
+        for (const source of candidateSources(candidate)) {
           names.push(source.name, source.market_name, source.market_hash_name);
         }
         for (const image of candidate.querySelectorAll("img")) {
@@ -676,6 +703,7 @@
 
       const isBlockedWeaponCandidate = (candidate) => {
         if (candidateNames(candidate).some(name => blockedWeaponNamePattern.test(name))) return true;
+        if (isKillstreakCandidate(candidate)) return true;
 
         // Check every image/currentSrc inside the item, not merely the first
         // <img>. Steam can put the actual item image in a different image
@@ -708,7 +736,7 @@
         if (!candidate) continue;
 
         if (isBlockedWeaponCandidate(candidate)) {
-          console.debug("TF2 Metal Trader: skipped blocked normal-weapon candidate", candidate.id);
+          console.debug("TF2 Metal Trader: skipped blocked normal-weapon candidate (Fish Cake, blocked image or killstreak item)", candidate.id);
           continue;
         }
 
@@ -755,6 +783,39 @@
         requestId: detail.requestId ?? null,
         ok: false,
         found: false,
+        error: error?.message || String(error)
+      });
+    }
+  });
+
+  // Tells which inventory items are craftable. Steam's item data lists "( Not Usable in Crafting )"
+  // among the description lines of an uncraftable TF2 item. The answer is {assetId: true|false}
+  // (true = craftable); an item Steam gave no description for is left out.
+  window.addEventListener("tmt-classify-craftability", event => {
+    let detail = {};
+    try {
+      detail = typeof event.detail === "string" ? JSON.parse(event.detail) : event.detail || {};
+      const side = detail.side === "their" ? "their" : "you";
+      const ids = (Array.isArray(detail.assetIds) ? detail.assetIds : []).map(String).filter(id => /^\d+$/.test(id));
+      const inventory = activeInventoryContainer(side);
+      let inventoryData = null;
+      try {
+        const user = side === "their" ? window.UserThem : window.UserYou;
+        inventoryData = user?.getInventory?.(440, "2")?.rgInventory || null;
+      } catch (_) {}
+      const craftable = {};
+      for (const id of ids) {
+        const source = inventoryData?.[id] || inventory?.querySelector(`#item440_2_${id}`)?.rgItem || null;
+        if (!source || !Array.isArray(source.descriptions)) continue;
+        const uncraftable = source.descriptions.some(line => /not usable in crafting/i.test(String(typeof line === "string" ? line : line?.value || ""))) ||
+          /^non[- ]craftable\b/i.test(String(source.market_hash_name || source.market_name || source.name || ""));
+        craftable[id] = !uncraftable;
+      }
+      emit("tmt-classify-craftability-result", { requestId: detail.requestId, ok: true, craftable });
+    } catch (error) {
+      emit("tmt-classify-craftability-result", {
+        requestId: detail.requestId ?? null,
+        ok: false,
         error: error?.message || String(error)
       });
     }

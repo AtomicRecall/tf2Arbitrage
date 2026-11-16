@@ -164,6 +164,13 @@ Good Trade the bot then:
 3. sends the verified Backpack.tf offers, one hat set per buyer, using different copies each time,
 4. tracks them and re-sends any Steam cancelled.
 
+**Craftable or not.** STN names an uncraftable item "Non-Craftable <name>", and those are scanned against
+Backpack.tf's Non-Craftable page and buy orders like any other item; every other item is assumed craftable.
+STN's pages say nothing more, so before an STN or scrap.tf offer is accepted its items are read through the
+Steam Web API: an offer holding items marked "( Not Usable in Crafting )" for a craftable job (or craftable
+ones for a Non-Craftable job) is not accepted, and Metal Trader only puts a copy of the right kind into the
+bot offers.
+
 **Raw keys only.** STN and scrap.tf build their own Steam offers and convert metal into keys at their
 own rate when your inventory does not hold what a price asks for, and that cannot be changed from here.
 So before every purchase of a key-priced hat (a price like *5 keys, 53 ref*) the add-on reads how many
@@ -188,6 +195,9 @@ is already running finishes first). On a Mac a closed window does not quit Firef
 asks the confirm server on the same computer to shut down (`POST /shutdown`), which makes the launcher
 quit Firefox and exit. Closing the Terminal or killing the launcher quits Firefox and the server too.
 Closing only the scanner window by hand stops a running scan.
+
+Only one scan runs at a time: while one is running (or waiting for its next STN rescan round) its button is lit up with
+"running…" and the other scan buttons are switched off until you press Stop or the scan ends.
 
 Anything to do with trade offers (the Steam offer checks while scanning, the STN purchase, the offers sent to bots)
 happens in the main window, as an active tab; the tab you were on comes back afterwards. When a scan of an STN

@@ -1,6 +1,22 @@
-# TF2 Metal Trader v0.9.127
+# TF2 Metal Trader v0.9.130
 
 Firefox extension for automating TF2 trades from Backpack.tf/STN through Steam trade offers.
+
+## v0.9.130 — craftable and Non-Craftable copies are not mixed up
+
+- Offer links from the arbitrage scanner can carry `tmt_craftable` (`1` = craftable, `0` = Non-Craftable). The item picker reads Steam's item data (page bridge event `tmt-classify-craftability`; an uncraftable TF2 item has the description line "( Not Usable in Crafting )") and skips copies of the other kind, so a craftable buy order never gets an uncraftable copy and a "Non-Craftable ..." order gets one. If no copy of the right kind exists the offer stops with a message saying so. When Steam gives no craftability data nothing is filtered, as before.
+- A name like "Non-Craftable Ap-Sap" is searched as "Ap-Sap" (Non-Craftable is not part of the name Steam shows).
+
+## v0.9.129 — metal is picked from the end of the results page
+
+- When metal (refined, reclaimed, scrap) is added to a trade, the items are now taken from the end of Steam's search result page instead of the start. The first items of an inventory are the ones most likely to be already used by another offer, which causes "Items Now Unavailable For Trade" and resent trades. Each search pass still uses the same single results page, so nothing else about the metal search changes.
+
+## v0.9.128 — killstreak weapons are never used as the half-scrap weapon
+
+- The normal-weapon picker (Primary/Secondary half-scrap weapon, also the fallback weapon from your own inventory) now skips every killstreak item. Before this, only Fish Cake and a few blocked images were skipped, and the Unique + Not Marketable filters were the only protection, which does not reliably exclude killstreak weapons.
+- An item counts as killstreak when Steam's own data for it (name, market name, type, description lines or tags, read from `rgItem` / the inventory data, plus the image `alt`/`title`) mentions "Killstreak", "Killstreaks Active", "Killstreaker" or "Sheen:" — this covers Killstreak, Specialized Killstreak, Professional Killstreak and Strange ones.
+- The picker keeps going through the rendered candidates and takes the first one that is not blocked. If every candidate is a killstreak item, no weapon is found and the existing Scrap-only change fallback runs.
+- Normal items bought or sold in an offer (the listing's item itself) are not affected: those are searched by exact name, as before.
 
 ## v0.9.127 — key prices use keys, not their full metal value
 

@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.143
+Current version 0.7.146
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,17 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.146 changes:
+- Craftable / Non-Craftable. STN names an uncraftable item "Non-Craftable <name>" (for example "Non-Craftable Ap-Sap") and that name is already compared with Backpack.tf's Non-Craftable page and Non-Craftable buy orders (craftable=-1), so those items are scanned for arbitrage like any other. Every other STN / scrap.tf item is assumed craftable.
+- STN's pages say nothing more about it, so the offer is read: before an STN or scrap.tf purchase offer is accepted, its items are read through the Steam Web API (get_descriptions) and checked for "( Not Usable in Crafting )". An offer that holds uncraftable items for a craftable job (or craftable ones for a "Non-Craftable" job) is NOT accepted, with a message saying to decline it in Steam. When Steam gives no descriptions the offer goes ahead as before.
+- The offer sent to a Backpack.tf bot now carries tmt_craftable: Metal Trader only puts a copy of the right kind into it (a craftable copy for a craftable buy order, a Non-Craftable one for a Non-Craftable order).
+
+V0.7.145 changes:
+- The popup shows which scan is running: that button is lit up and says "running…", and every other scan button (Scan Pages, Scan No Sell, Scan Offline, Check saved items) and the site checkboxes are switched off until Stop is pressed or the scan ends. This also holds while the STN auto rescan is waiting for its next round (it ends with Stop), and when the popup is opened again during a scan. The background script now also refuses to start a second scan while one is running or waiting to rescan, so only one scan runs at a time.
+
+V0.7.144 changes:
+- Stop and Check saved items were drawn cut off (only half their height) in the popup. Their click animation no longer uses overflow clipping, a positioning box or a pseudo-element on the button; the "busy" effect is now a brightness pulse instead of a light sweep, so the button's box can no longer be clipped. The click pulse stays.
 
 V0.7.143 changes:
 - Click animation fix: the three scan buttons did not clip their own light sweep like Stop and Check saved items did (the sweep was drawn against the whole popup instead of the button), and the pulse ring is now 8 px at most so the popup's side padding (10-12 px) can never cut it off.

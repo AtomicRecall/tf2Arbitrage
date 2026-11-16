@@ -362,7 +362,8 @@
     const comment = params.get("tmt_comment") || "";
     const description = params.get("tmt_description") || "";
     return {
-      name: params.get("tmt_name") || "",
+      // "Non-Craftable" is not part of the name Steam shows; it is a property of the copy (below).
+      name: (params.get("tmt_name") || "").replace(/\bnon[- ]craftable\s+/i, "").trim(),
       price: params.get("tmt_price") || "",
       intent: resolveListingIntent(params.get("tmt_intent"), comment, description),
       assetId: params.get("tmt_asset") || "",
@@ -376,6 +377,8 @@
       keyRate: params.get("tmt_key_rate") || "",
       // Advanced inventory filters used when searching for the item itself.
       quality: params.get("tmt_quality") || "",
+      // "1" = only a craftable copy, "0" = only a Non-Craftable one, absent = either.
+      craftable: params.has("tmt_craftable") ? params.get("tmt_craftable") === "1" : null,
       cosmetic: params.has("tmt_cosmetic") ? params.get("tmt_cosmetic") === "1" : null,
       comment,
       description
@@ -390,7 +393,11 @@
     const cosmetic = typeof listing?.cosmetic === "boolean"
       ? listing.cosmetic
       : !NON_COSMETIC_ITEM_PATTERN.test(String(listing?.name || ""));
-    return { quality: listing?.quality || "Unique", cosmetic };
+    return {
+      quality: listing?.quality || "Unique",
+      cosmetic,
+      craftable: typeof listing?.craftable === "boolean" ? listing.craftable : null
+    };
   }
 
   function isArbitrageVerificationPage() {
@@ -741,6 +748,24 @@
       const readMatchingCandidates = (page) => [...page.querySelectorAll('.itemHolder .item.app440, .itemHolder .item[id^="item440_"]')]
         .filter(item => isVisible(item) && item.querySelector("img") && getAssetId(item))
         .filter(isExactKeyImage);
+      // A buy order for a craftable item must get a craftable copy and a Non-Craftable order a
+      // Non-Craftable one (they sell for different prices), so copies of the wrong kind are not
+      // candidates. When Steam gives no craftability data, nothing is filtered out.
+      const wantCraftable = typeof itemFilters?.craftable === "boolean" ? itemFilters.craftable : null;
+      let wrongCraftability = 0;
+      const keepWantedCraftability = async (list) => {
+        if (wantCraftable === null || !list.length) return list;
+        let known = null;
+        try {
+          known = await classifyCraftability(side, list.map(getAssetId));
+        } catch (error) {
+          console.warn("TF2 Metal Trader: could not read the craftability of the candidates.", error);
+        }
+        if (!known) return list;
+        const kept = list.filter(item => known[getAssetId(item)] === undefined || known[getAssetId(item)] === wantCraftable);
+        wrongCraftability += list.length - kept.length;
+        return kept;
+      };
       let target = null;
       let reservedVisible = 0;
       for (let searchAttempt = 0; searchAttempt < 2; searchAttempt++) {
@@ -761,7 +786,7 @@
         await waitForSearchToSettle(itemName, side);
 
         let page = await waitForInventoryReady(side);
-        let candidates = readMatchingCandidates(page);
+        let candidates = await keepWantedCraftability(readMatchingCandidates(page));
         reservedVisible = candidates.filter(item => excluded.has(getAssetId(item))).length;
         let usable = candidates.filter(item => !excluded.has(getAssetId(item)));
 
@@ -775,7 +800,7 @@
           nextButton.click();
           await sleep(450);
           page = await waitForInventoryReady(side);
-          candidates = readMatchingCandidates(page);
+          candidates = await keepWantedCraftability(readMatchingCandidates(page));
           reservedVisible += candidates.filter(item => excluded.has(getAssetId(item))).length;
           usable = candidates.filter(item => !excluded.has(getAssetId(item)));
         }
@@ -796,6 +821,11 @@
         if (reservedVisible > 0) {
           throw new Error(
             `No unused ${itemName} is left in the ${side} TF2 inventory: all ${reservedVisible} copies Steam shows are already reserved for other offers in this run.`
+          );
+        }
+        if (wrongCraftability > 0) {
+          throw new Error(
+            `The ${side} TF2 inventory has ${wrongCraftability} ${itemName} of the wrong kind, but none that is ${wantCraftable ? "craftable" : "Non-Craftable (Not Usable in Crafting)"}.`
           );
         }
         if (itemName === KEY_NAME) {
@@ -1491,6 +1521,35 @@
       window.addEventListener("tmt-find-normal-weapon-result", onResult);
       window.dispatchEvent(new CustomEvent("tmt-find-normal-weapon", {
         detail: JSON.stringify({ requestId, side })
+      }));
+    });
+  }
+
+  // {assetId: true|false} (true = craftable) for the given items of an inventory side, read from
+  // Steam's item data in the page. Resolves to null when Steam does not answer.
+  async function classifyCraftability(side, assetIds) {
+    await ensurePageBridge();
+    return new Promise(resolve => {
+      const requestId = `craftability-${side}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const timeout = setTimeout(() => {
+        window.removeEventListener("tmt-classify-craftability-result", onResult);
+        resolve(null);
+      }, 4000);
+      function onResult(event) {
+        let detail;
+        try {
+          detail = typeof event.detail === "string" ? JSON.parse(event.detail) : event.detail;
+        } catch {
+          return;
+        }
+        if (!detail || detail.requestId !== requestId) return;
+        clearTimeout(timeout);
+        window.removeEventListener("tmt-classify-craftability-result", onResult);
+        resolve(detail.ok ? detail.craftable || {} : null);
+      }
+      window.addEventListener("tmt-classify-craftability-result", onResult);
+      window.dispatchEvent(new CustomEvent("tmt-classify-craftability", {
+        detail: JSON.stringify({ requestId, side, assetIds })
       }));
     });
   }
@@ -2372,6 +2431,11 @@
 
           return true;
         });
+
+      // Take the metal from the END of the shown results page. The first items of a trader's
+      // inventory are the busiest ones (most recently received, most likely already promised to
+      // another offer), and picking them is what makes Steam answer "Items Now Unavailable For Trade".
+      items.reverse();
 
       if (items.length === 0) {
         const shown = page.querySelectorAll('.itemHolder .item.app440, .itemHolder .item[id^="item440_"]').length;

@@ -436,6 +436,7 @@ function hydrate(state){
   if(r?.version) $("version").textContent=`v${r.version}`;
   if(r?.state) hydrate(r.state);
   if(r?.tradeAutomation)renderTradeAutomation(r.tradeAutomation);
+  applyScanMode(r?.scanMode||null);
 })();
 
 saveSteamApiKey.onclick=async()=>{
@@ -618,13 +619,44 @@ function sitesFor(mode){
   return stn.checked&&scrap.checked?"all":stn.checked?"stn":scrap.checked?"scrap.tf":null;
 }
 function scanClicked(button,mode,extra={}){
+  if(activeScanMode)return;
   const sites=sitesFor(mode);
   if(!sites){status.textContent="Tick at least one website (stntrading.eu or scrap.tf) next to this button.";return}
-  clickFeedback(button,startScan("START_SCAN",{...extra,sites}));
+  clickFeedback(button,startScan("START_SCAN",{...extra,sites},{scan:"pages",scanNoSell:"noSell",scanOffline:"offline"}[mode]));
 }
 scan.onclick=()=>scanClicked(scan,"scan");
 scanNoSell.onclick=()=>scanClicked(scanNoSell,"scanNoSell",{noSell:true});
 scanOffline.onclick=()=>scanClicked(scanOffline,"scanOffline",{offline:true});
+
+// Which scan is running: its button is highlighted and says so, every other scan button (and the site
+// boxes) is switched off until Stop is pressed or the scan ends, so only one scan runs at a time.
+// background.js is the source of truth (it also rejects a second scan).
+let activeScanMode=null;
+let savedEntryCount=0;
+const SCAN_BUTTONS=[
+  {mode:"pages",button:scan,label:()=>"Scan Pages"},
+  {mode:"noSell",button:scanNoSell,label:()=>"Scan No Sell"},
+  {mode:"offline",button:scanOffline,label:()=>"Scan Offline"},
+  {mode:"saved",button:scanSaved,label:()=>`Check saved items (${savedEntryCount})`}
+];
+function refreshScanButtons(){
+  for(const entry of SCAN_BUTTONS){
+    const active=activeScanMode===entry.mode;
+    entry.button.classList.toggle("scan-active",active);
+    entry.button.disabled=activeScanMode!==null||(entry.mode==="saved"&&!savedEntryCount);
+    entry.button.textContent=active?`${entry.label()} — running…`:entry.label();
+    entry.button.title=entry.button.title.replace(/^RUNNING NOW — /,"");
+    if(active)entry.button.title=`RUNNING NOW — ${entry.button.title}`;
+  }
+  for(const boxes of Object.values(SCAN_SITE_BOXES)){boxes.stn.disabled=boxes.scrap.disabled=activeScanMode!==null}
+  stop.classList.toggle("scan-stop-ready",activeScanMode!==null);
+}
+function applyScanMode(mode){activeScanMode=mode||null;refreshScanButtons()}
+let scanModeSyncTimer=0;
+function syncScanMode(){
+  clearTimeout(scanModeSyncTimer);
+  scanModeSyncTimer=setTimeout(()=>send({type:"GET_SCAN_MODE"}).then(r=>applyScanMode(r?.mode||null)).catch(()=>{}),250);
+}
 // Click feedback done in the popup itself: a pulse ring right after the click and, while the
 // request is being answered, a light sweep across the button.
 function clickFeedback(button,work){
@@ -636,11 +668,12 @@ function clickFeedback(button,work){
   button.classList.add("btn-busy");
   Promise.resolve(work).catch(()=>{}).finally(()=>setTimeout(()=>button.classList.remove("btn-busy"),350));
 }
-scanSaved.onclick=()=>clickFeedback(scanSaved,startScan("START_SAVED_SCAN"));
-async function startScan(type,extra={}){
+scanSaved.onclick=()=>{if(activeScanMode)return;clickFeedback(scanSaved,startScan("START_SAVED_SCAN",{},"saved"))};
+async function startScan(type,extra={},mode=null){
   api.storage.local.set({keyRate:+rate.value||63});
   const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
-  if(!r?.ok){status.textContent=r?.error||"Could not start scan.";return}
+  if(!r?.ok){status.textContent=r?.error||"Could not start scan.";syncScanMode();return}
+  if(mode)applyScanMode(mode);
   results.innerHTML="";
   unverifiedResults.innerHTML="";
   activeFilter="all"; tabs.forEach(x=>x.classList.toggle("active",x.dataset.filter==="all"));
@@ -652,12 +685,13 @@ async function startScan(type,extra={}){
   const sourceText=Object.entries(r.sources||{}).map(([name,count])=>name==="stn-reverse"?`${count} STN buy-price checks`:`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
   status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
-async function stopScanClicked(){await send({type:"STOP_SCAN"});status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
+async function stopScanClicked(){await send({type:"STOP_SCAN"});applyScanMode(null);status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
 stop.onclick=()=>clickFeedback(stop,stopScanClicked());
 
 api.runtime.onMessage.addListener(async m=>{
   if(m.type==="TRADE_AUTOMATION_STATUS"){
     renderTradeAutomation(m.state);
+    syncScanMode();
   }
   if(m.type==="OFFER_CHECK_PROGRESS"){
     status.textContent=`Checking profitable offer ${m.checked} / ${m.total} for ${m.itemName} — ${m.traderName}`;
@@ -670,6 +704,7 @@ api.runtime.onMessage.addListener(async m=>{
   }
   if(m.type==="SCAN_FINISHED"){
     status.textContent=`Finished: ${m.checked} / ${m.total} items checked.`;
+    syncScanMode();
   }
 });
 
@@ -694,8 +729,8 @@ function savedStatusText(entry){
 function renderSaved(){
   const entries=Object.values(savedTrades).filter(entry=>entry&&entry.name).sort((a,b)=>Math.max(b.lastGoodAt||0,b.lastBoughtAt||0)-Math.max(a.lastGoodAt||0,a.lastBoughtAt||0));
   savedCount.textContent=String(entries.length);
-  scanSaved.textContent=`Check saved items (${entries.length})`;
-  scanSaved.disabled=!entries.length;
+  savedEntryCount=entries.length;
+  refreshScanButtons();
   clearSaved.disabled=!entries.length;
   savedList.innerHTML=entries.length?"":`<div class="hint">Nothing saved yet.</div>`;
   for(const entry of entries){

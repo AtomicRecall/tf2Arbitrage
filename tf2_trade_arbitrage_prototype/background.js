@@ -9,6 +9,15 @@ let tradeAutomationEnabled=false;
 // An offline scan (its own popup button) only checks: Good Trades are saved, nothing is bought and no
 // offer is sent, whatever the automatic-trading setting is. The setting itself is left as it was.
 let offlineScan=false;
+// Which popup button started the scan that is running (or waiting to rescan): "pages", "noSell",
+// "offline", "saved" or "reverse". The popup shows it and only one scan runs at a time.
+let scanMode=null;
+const SCAN_MODE_NAMES={pages:"Scan Pages",noSell:"Scan No Sell",offline:"Scan Offline",saved:"Check saved items",reverse:"the reverse scan"};
+function currentScanMode(){return (running||autoRescanContext)?scanMode:null}
+function scanBusyError(){
+  const mode=currentScanMode();
+  return mode?`${SCAN_MODE_NAMES[mode]||"A scan"} is already ${running?"running":"waiting to scan again"}. Press Stop first.`:"";
+}
 let tradeAutomationQueue=[];
 let activeTradeJob=null;
 let tradeWorkerRunning=false;
@@ -683,6 +692,75 @@ async function fetchSteamTradeOffer(apiKey,offerId){
   return offer&&typeof offer==="object"&&String(offer.tradeofferid||"")===String(offerId)?offer:null;
 }
 
+// ---- craftability of a purchase offer ------------------------------------------
+// STN names an uncraftable item "Non-Craftable <name>"; an item without that word is expected to
+// be craftable, but STN's pages say nothing more. The prices on Backpack.tf differ a lot between
+// the two, so before an STN / scrap.tf offer is accepted, the items in it are read through the Steam
+// Web API (their description says "( Not Usable in Crafting )" when they are uncraftable) and the
+// offer is refused when it holds something other than what the job was priced for.
+const UNCRAFTABLE_DESCRIPTION=/not usable in crafting/i;
+function descriptionIsUncraftable(description){
+  if(!description)return false;
+  if(/^non[- ]craftable\b/i.test(String(description.market_hash_name||description.market_name||description.name||"")))return true;
+  return (Array.isArray(description.descriptions)?description.descriptions:[])
+    .some(line=>UNCRAFTABLE_DESCRIPTION.test(String(line?.value||"")));
+}
+function offerCraftabilityReport(offer,descriptions){
+  const byKey=new Map();
+  for(const description of Array.isArray(descriptions)?descriptions:[]){
+    byKey.set(`${description.appid||440}_${description.classid}_${description.instanceid||0}`,description);
+  }
+  const report={total:0,craftable:0,uncraftable:0,unknown:0};
+  for(const item of Array.isArray(offer?.items_to_receive)?offer.items_to_receive:[]){
+    if(Number(item?.appid||440)!==440)continue;
+    const amount=Math.max(1,Number(item.amount)||1);
+    report.total+=amount;
+    const description=byKey.get(`${item.appid||440}_${item.classid}_${item.instanceid||0}`);
+    if(!description)report.unknown+=amount;
+    else if(descriptionIsUncraftable(description))report.uncraftable+=amount;
+    else report.craftable+=amount;
+  }
+  return report;
+}
+async function fetchSteamTradeOfferWithDescriptions(apiKey,offerId){
+  const url=new URL("https://api.steampowered.com/IEconService/GetTradeOffer/v1/");
+  url.searchParams.set("key",apiKey);
+  url.searchParams.set("tradeofferid",String(offerId));
+  url.searchParams.set("language","en");
+  url.searchParams.set("get_descriptions","true");
+  const payload=await steamApiRequest(url,"GetTradeOffer");
+  const offer=payload?.response?.offer;
+  if(!offer||typeof offer!=="object"||String(offer.tradeofferid||"")!==String(offerId))return null;
+  return {offer,descriptions:payload?.response?.descriptions||[]};
+}
+// Throws when the offer holds uncraftable items for a craftable job (or craftable ones for a
+// "Non-Craftable" job), so the page never accepts it. When Steam cannot tell, the offer goes ahead.
+async function verifyPurchaseOfferCraftability(job,batchNumber,offerId,apiKey){
+  const expectUncraftable=getBackpackSpec(job.name).craftability==="Non-Craftable";
+  let report=null;
+  try{
+    const read=await fetchSteamTradeOfferWithDescriptions(apiKey,offerId);
+    if(read)report=offerCraftabilityReport(read.offer,read.descriptions);
+  }catch(error){
+    emitTradeAutomationStatus(`Batch ${batchNumber}: could not read the items of Steam offer #${offerId} to check their craftability (${String(error?.message||error).slice(0,120)}). Continuing without that check.`);
+    return null;
+  }
+  if(!report||!report.total||report.unknown===report.total){
+    emitTradeAutomationStatus(`Batch ${batchNumber}: Steam did not describe the items of offer #${offerId}, so their craftability was not checked.`);
+    return report;
+  }
+  const wrong=expectUncraftable?report.craftable:report.uncraftable;
+  if(wrong>0){
+    throw new Error(
+      expectUncraftable
+        ?`Steam offer #${offerId} holds ${wrong} craftable item${wrong===1?"":"s"}, but ${job.name} is a Non-Craftable item. The offer was not accepted; decline it in Steam.`
+        :`Steam offer #${offerId} holds ${wrong} Non-Craftable item${wrong===1?"":"s"} ("Not Usable in Crafting"), but ${job.name} was priced as craftable. The offer was not accepted; decline it in Steam.`
+    );
+  }
+  emitTradeAutomationStatus(`Batch ${batchNumber}: offer #${offerId} holds ${expectUncraftable?"Non-Craftable":"craftable"} ${job.name} as expected.`);
+  return report;
+}
+
 function setSteamApiPurchaseProgress(job,phase,message,state=null){
   const updatedAt=Date.now();
   const hasState=Number.isSafeInteger(state);
@@ -1010,6 +1088,8 @@ async function acceptStnPurchaseBatch(job,batchNumber,batchAmount,rawOfferUrl,st
   purchaseOfferUrl.hash="";
   const purchaseOfferId=purchaseOfferUrl.pathname.match(/^\/tradeoffer\/(\d+)\/?$/i)?.[1]||"";
   if(!purchaseOfferId)throw new Error(`STN's purchase batch ${batchNumber} did not include a valid Steam trade-offer ID.`);
+  // STN's pages do not say whether an item is craftable, the offer does: check it before accepting.
+  await verifyPurchaseOfferCraftability(job,batchNumber,purchaseOfferId,steamApiKey);
 
   job.step="waiting-for-purchase-acceptance";
   job.purchaseOfferId=purchaseOfferId;
@@ -1121,6 +1201,9 @@ function buildBotOfferUrl(listing,itemName,jobId,excludedAssetIds=[]){
   // Steam's Quality (and Cosmetic) filters when searching the inventory.
   const spec=getBackpackSpec(itemName);
   payload.set("tmt_quality",spec.quality||"Unique");
+  // Craftable and Non-Craftable copies sell for different prices: the offer page only puts a
+  // copy of the right kind into the offer.
+  payload.set("tmt_craftable",spec.craftability==="Non-Craftable"?"0":"1");
   payload.set("tmt_cosmetic",NON_COSMETIC_ITEM_PATTERN.test(spec.itemName||itemName)?"0":"1");
   // Lets Metal Trader pay a key price in metal when the paying side has too
   // few physical keys.
@@ -4095,6 +4178,7 @@ function startItemScan(m,sendResponse){
       sourceWindowId=tab.windowId;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
       offlineScan=m.offline===true;
+      scanMode=offlineScan?"offline":m.noSell===true?"noSell":"pages";
       if(!offlineScan&&typeof m.autoTradesEnabled==="boolean"){
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
@@ -4180,15 +4264,22 @@ async function startAutoRescan(context){
 setInterval(()=>{if(running)saveState({finished:false})},CHECKPOINT_MS);
 
 api.runtime.onMessage.addListener((m,s,sendResponse)=>{
+  if(m.type==="GET_SCAN_MODE"){
+    sendResponse({mode:currentScanMode()});
+    return true;
+  }
   if(m.type==="START_SCAN"){
+    const busy=scanBusyError();
+    if(busy){sendResponse({ok:false,error:busy});return}
     autoRescanToken++;
     startItemScan(m,sendResponse);
     return true;
   }
   if(m.type==="START_REVERSE_SCAN"){
     (async()=>{
-      if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
-      autoRescanContext=null;autoRescanToken++;offlineScan=false;
+      const busy=scanBusyError();
+      if(busy){sendResponse({ok:false,error:busy});return}
+      autoRescanContext=null;autoRescanToken++;offlineScan=false;scanMode="reverse";
       const tabs=await qTabs({active:true,currentWindow:true}).catch(()=>[]);
       const tab=tabs[0];
       if(!tab){sendResponse({ok:false,error:"No active tab."});return}
@@ -4233,7 +4324,8 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   }
   if(m.type==="START_SAVED_SCAN"){
     (async()=>{
-      if(running){sendResponse({ok:false,error:"A scan is already running. Stop it first."});return}
+      const busy=scanBusyError();
+      if(busy){sendResponse({ok:false,error:busy});return}
       autoRescanContext=null;autoRescanToken++;
       const stored=await storageGet({[TF2SavedTrades.STORAGE_KEY]:{}});
       const saved=TF2SavedTrades.list(stored[TF2SavedTrades.STORAGE_KEY]);
@@ -4244,6 +4336,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       sourceWindowId=tabs[0]?.windowId??null;
       if(Number.isFinite(+m.notificationVolume))notificationVolume=Math.max(0,Math.min(1,+m.notificationVolume));
       offlineScan=m.offline===true;
+      scanMode="saved";
       if(!offlineScan&&typeof m.autoTradesEnabled==="boolean"){
         tradeAutomationEnabled=m.autoTradesEnabled;
         storageSet({tradeAutomationEnabled});
@@ -4465,6 +4558,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
   if(m.type==="GET_STATE"){
     storageGet({scanState:null}).then(v=>sendResponse({
       state:v.scanState,
+      scanMode:currentScanMode(),
       version:EXTENSION_VERSION,
       tradeAutomation:getTradeAutomationState()
     })).catch(()=>sendResponse({state:null,version:EXTENSION_VERSION,tradeAutomation:getTradeAutomationState()}));

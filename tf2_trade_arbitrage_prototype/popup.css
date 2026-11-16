@@ -72,14 +72,17 @@
 .bought-recent{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:3px 0;padding:4px 6px;background:#242424;border:1px solid #111;font-size:10px;color:#ddd}
 .bought-recent span:first-child{color:#999;font-size:9px}
 .bought-recent small{color:#888;font-size:9px}
-/* every button that plays the click animation: the sweep is drawn inside it, so it must be its own positioning box */
-#stop,#scanSaved,.scan-group button{position:relative;overflow:hidden}
+/* Click animation of the Stop, Check saved items and scan buttons. Only transform, box-shadow and filter
+   are animated: no overflow, positioning or pseudo-element on the button, so its box is never changed or clipped. */
+button:disabled{opacity:.5;cursor:not-allowed}
+/* The button of the scan that is running: lit up and not dimmed although it is switched off. */
+button.scan-active:disabled{opacity:1;cursor:progress;border-color:#d38b32;background:linear-gradient(#8a5a1e,#5c3a10);color:#fff3d6;box-shadow:0 0 0 2px rgba(211,139,50,.55),inset 0 1px 0 rgba(255,255,255,.15)}
 button.btn-pulse{animation:btn-pulse .6s ease-out}
 @keyframes btn-pulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(211,139,50,.75)}35%{transform:scale(.97);box-shadow:0 0 0 4px rgba(211,139,50,.4)}100%{transform:scale(1);box-shadow:0 0 0 8px rgba(211,139,50,0)}}
-button.btn-busy{cursor:progress}
-button.btn-busy:after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);transform:translateX(-100%);animation:btn-sweep .8s linear infinite;pointer-events:none}
-@keyframes btn-sweep{to{transform:translateX(320%)}}
-@media (prefers-reduced-motion:reduce){button.btn-pulse,button.btn-busy:after{animation:none}}
+button.btn-busy{cursor:progress;animation:btn-busy .7s ease-in-out infinite alternate}
+@keyframes btn-busy{from{filter:brightness(1)}to{filter:brightness(1.45)}}
+button.btn-pulse.btn-busy{animation:btn-pulse .6s ease-out,btn-busy .7s ease-in-out infinite alternate}
+@media (prefers-reduced-motion:reduce){button.btn-pulse,button.btn-busy{animation:none}}
 .scan-group{margin:0 0 8px}
 .scan-group button{margin-bottom:3px}
 .scan-sites{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;color:#f0d3a9;font-size:11px}
