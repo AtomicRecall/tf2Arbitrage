@@ -290,7 +290,7 @@ def run(count, dry_run, check_focus, countdown, spread, refresh_mode, invert_scr
 
     refresh_list(clicker, refresh_mode, spread, invert_scroll, check_focus)
     if refresh_mode != "none":
-        pause(2.0, 3.5, "for the list to refresh")
+        pause(4.0, 6.0, "for the list to refresh")
 
     for number in range(1, count + 1):
         print(f"Trade {number}/{count}")
