@@ -197,11 +197,11 @@ quit Firefox and exit. Closing the Terminal or killing the launcher quits Firefo
 Closing only the scanner window by hand stops a running scan.
 
 Only one scan runs at a time: while one is running (or waiting for its next STN rescan round) its button is lit up with
-"running…" and the other scan buttons are switched off until you press Stop or the scan ends.
+"running…" and the other scan buttons are switched off until you click the running one again (it is the Stop button) or the scan ends.
 
 Anything to do with trade offers (the Steam offer checks while scanning, the STN purchase, the offers sent to bots)
 happens in the main window, as an active tab; the tab you were on comes back afterwards. When a scan of an STN
-page finishes, the add-on refreshes that STN tab, presses PageDown 3 times and scans again until you press Stop
+page finishes, the add-on refreshes that STN tab, presses PageDown 3 times and scans again until you click the running scan button again
 (checkbox in the popup to turn it off). After 3 such rounds the next one loads the first page of the STN hats listing
 (`https://stntrading.eu/tf2/hats?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1`)
 instead of refreshing, presses PageDown 3 times and scans that, then the count of 3 starts again.

@@ -3,7 +3,7 @@ const api=typeof browser!=="undefined"?browser:chrome;
 // panel's width instead of the popup's fixed one.
 if(new URLSearchParams(location.search).get("mode")==="sidebar")document.documentElement.classList.add("sidebar");
 const $=id=>document.getElementById(id);
-const scan=$("scan"),stop=$("stop"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
+const scan=$("scan"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
@@ -619,17 +619,23 @@ function sitesFor(mode){
   return stn.checked&&scrap.checked?"all":stn.checked?"stn":scrap.checked?"scrap.tf":null;
 }
 function scanClicked(button,mode,extra={}){
-  if(activeScanMode)return;
+  const scanMode={scan:"pages",scanNoSell:"noSell",scanOffline:"offline"}[mode];
+  // The running scan's own button is its Stop button: clicking it again ends the scan.
+  if(activeScanMode){
+    if(activeScanMode===scanMode)clickFeedback(button,stopScanClicked());
+    return;
+  }
   const sites=sitesFor(mode);
   if(!sites){status.textContent="Tick at least one website (stntrading.eu or scrap.tf) next to this button.";return}
-  clickFeedback(button,startScan("START_SCAN",{...extra,sites},{scan:"pages",scanNoSell:"noSell",scanOffline:"offline"}[mode]));
+  clickFeedback(button,startScan("START_SCAN",{...extra,sites},scanMode));
 }
 scan.onclick=()=>scanClicked(scan,"scan");
 scanNoSell.onclick=()=>scanClicked(scanNoSell,"scanNoSell",{noSell:true});
 scanOffline.onclick=()=>scanClicked(scanOffline,"scanOffline",{offline:true});
 
-// Which scan is running: its button is highlighted and says so, every other scan button (and the site
-// boxes) is switched off until Stop is pressed or the scan ends, so only one scan runs at a time.
+// Which scan is running: its button is highlighted and says so (clicking it again stops the scan), every
+// other scan button (and the site boxes) is switched off until the scan is stopped or ends, so only one
+// scan runs at a time.
 // background.js is the source of truth (it also rejects a second scan).
 let activeScanMode=null;
 let savedEntryCount=0;
@@ -643,13 +649,12 @@ function refreshScanButtons(){
   for(const entry of SCAN_BUTTONS){
     const active=activeScanMode===entry.mode;
     entry.button.classList.toggle("scan-active",active);
-    entry.button.disabled=activeScanMode!==null||(entry.mode==="saved"&&!savedEntryCount);
-    entry.button.textContent=active?`${entry.label()} — running…`:entry.label();
-    entry.button.title=entry.button.title.replace(/^RUNNING NOW — /,"");
-    if(active)entry.button.title=`RUNNING NOW — ${entry.button.title}`;
+    entry.button.disabled=!active&&(activeScanMode!==null||(entry.mode==="saved"&&!savedEntryCount));
+    entry.button.textContent=active?`${entry.label()} — running… (click to stop)`:entry.label();
+    entry.button.title=entry.button.title.replace(/^RUNNING NOW \(click to stop\) — /,"");
+    if(active)entry.button.title=`RUNNING NOW (click to stop) — ${entry.button.title}`;
   }
   for(const boxes of Object.values(SCAN_SITE_BOXES)){boxes.stn.disabled=boxes.scrap.disabled=activeScanMode!==null}
-  stop.classList.toggle("scan-stop-ready",activeScanMode!==null);
 }
 function applyScanMode(mode){activeScanMode=mode||null;refreshScanButtons()}
 let scanModeSyncTimer=0;
@@ -668,7 +673,13 @@ function clickFeedback(button,work){
   button.classList.add("btn-busy");
   Promise.resolve(work).catch(()=>{}).finally(()=>setTimeout(()=>button.classList.remove("btn-busy"),350));
 }
-scanSaved.onclick=()=>{if(activeScanMode)return;clickFeedback(scanSaved,startScan("START_SAVED_SCAN",{},"saved"))};
+scanSaved.onclick=()=>{
+  if(activeScanMode){
+    if(activeScanMode==="saved")clickFeedback(scanSaved,stopScanClicked());
+    return;
+  }
+  clickFeedback(scanSaved,startScan("START_SAVED_SCAN",{},"saved"));
+};
 async function startScan(type,extra={},mode=null){
   api.storage.local.set({keyRate:+rate.value||63});
   const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
@@ -686,7 +697,6 @@ async function startScan(type,extra={},mode=null){
   status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
 async function stopScanClicked(){await send({type:"STOP_SCAN"});applyScanMode(null);status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
-stop.onclick=()=>clickFeedback(stop,stopScanClicked());
 
 api.runtime.onMessage.addListener(async m=>{
   if(m.type==="TRADE_AUTOMATION_STATUS"){

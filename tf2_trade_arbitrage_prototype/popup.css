@@ -76,7 +76,7 @@
    are animated: no overflow, positioning or pseudo-element on the button, so its box is never changed or clipped. */
 button:disabled{opacity:.5;cursor:not-allowed}
 /* The button of the scan that is running: lit up and not dimmed although it is switched off. */
-button.scan-active:disabled{opacity:1;cursor:progress;border-color:#d38b32;background:linear-gradient(#8a5a1e,#5c3a10);color:#fff3d6;box-shadow:0 0 0 2px rgba(211,139,50,.55),inset 0 1px 0 rgba(255,255,255,.15)}
+button.scan-active,button.scan-active:disabled{opacity:1;cursor:pointer;border-color:#d38b32;background:linear-gradient(#8a5a1e,#5c3a10);color:#fff3d6;box-shadow:0 0 0 2px rgba(211,139,50,.55),inset 0 1px 0 rgba(255,255,255,.15)}
 button.btn-pulse{animation:btn-pulse .6s ease-out}
 @keyframes btn-pulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(211,139,50,.75)}35%{transform:scale(.97);box-shadow:0 0 0 4px rgba(211,139,50,.4)}100%{transform:scale(1);box-shadow:0 0 0 8px rgba(211,139,50,0)}}
 button.btn-busy{cursor:progress;animation:btn-busy .7s ease-in-out infinite alternate}
