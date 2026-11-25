@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.149
+Current version 0.7.150
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,10 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.150 changes:
+- No Stop button. The scan button that is running is its own Stop button: it says "running… (click to stop)" and clicking it again stops the scan (this holds for Scan Pages, Scan No Sell, Scan Offline and Check saved items). The other scan buttons stay switched off while a scan runs, as before.
+- Check order. The STN items are queued row by row from the top of the page, each row from left to right, by where the boxes are on the page (not by the page's internal order). Items checked in the last 60 minutes are still skipped, and with both sites ticked the scan still alternates STN and scrap.tf items.
 
 V0.7.149 changes:
 - STN stock first. Before an STN item is looked up on Backpack.tf, its own STN page (stntrading.eu/item/tf2/<name>) is opened and its stock and price are read. An item STN has none of is skipped there ("STN has none in stock right now") without opening Backpack.tf, and the current STN price replaces the list's price when they differ. A page that does not load is tried once more, and three misses in a row pause the scan for 45 seconds. When the item is also checked for selling to STN, the same visit reads STN's buy price, so the page is not opened twice.

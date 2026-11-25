@@ -11,9 +11,28 @@
     }
   };
 
+  // The item boxes in the order they are seen on the page: row by row from the top, each row from left
+  // to right. This is the order the scan checks them in. (It is normally the page's own order; going by
+  // where the boxes really are keeps it right even if the page lays them out differently.)
+  function inVisualOrder(nodes){
+    const boxes=nodes.map((node,index)=>{
+      const rect=node.getBoundingClientRect();
+      return {node,index,top:rect.top+window.scrollY,left:rect.left+window.scrollX,visible:rect.width>0&&rect.height>0};
+    });
+    // A hidden page has no positions to go by: keep the page's own order.
+    if(boxes.length<2||boxes.some(box=>!box.visible))return nodes;
+    const rows=[];
+    for(const box of [...boxes].sort((a,b)=>a.top-b.top||a.left-b.left)){
+      const row=rows[rows.length-1];
+      if(row&&Math.abs(box.top-row.top)<=20)row.boxes.push(box);
+      else rows.push({top:box.top,boxes:[box]});
+    }
+    return rows.flatMap(row=>row.boxes.sort((a,b)=>a.left-b.left||a.index-b.index).map(box=>box.node));
+  }
+
   function readBuyPage(){
     if(isScrapTf())return readScrapTfPage();
-    const nodes=[...document.querySelectorAll("a.mp-item-box-wrap")];
+    const nodes=inVisualOrder([...document.querySelectorAll("a.mp-item-box-wrap")]);
     const items=[];
     for(const node of nodes){
       const n=node.querySelector(".item-name"),p=node.querySelector(".item-price");

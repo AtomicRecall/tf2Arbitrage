@@ -16,7 +16,7 @@ const SCAN_MODE_NAMES={pages:"Scan Pages",noSell:"Scan No Sell",offline:"Scan Of
 function currentScanMode(){return (running||autoRescanContext)?scanMode:null}
 function scanBusyError(){
   const mode=currentScanMode();
-  return mode?`${SCAN_MODE_NAMES[mode]||"A scan"} is already ${running?"running":"waiting to scan again"}. Press Stop first.`:"";
+  return mode?`${SCAN_MODE_NAMES[mode]||"A scan"} is already ${running?"running":"waiting to scan again"}. Click the running scan button to stop it first.`:"";
 }
 let tradeAutomationQueue=[];
 let activeTradeJob=null;
@@ -4282,7 +4282,7 @@ async function autoRescanWait(token,ms){
 }
 
 // A scan of an STN page finished: refresh that page (its own link), press PageDown
-// three times and scan again, until Stop is pressed or another scan is started. After three
+// three times and scan again, until the scan button is clicked again or another scan is started. After three
 // such rounds the next one loads the first page of the STN hats listing instead of refreshing,
 // and the count starts over (it is paged down 3 times too, like every other round).
 async function startAutoRescan(context){
@@ -4293,7 +4293,7 @@ async function startAutoRescan(context){
   const goHome=roundsDone>=AUTO_RESCAN_ROUNDS_BEFORE_HOME;
   const idle=scanQueuedCount===0;
   const pause=idle?AUTO_RESCAN_IDLE_PAUSE_MS:AUTO_RESCAN_PAUSE_MS;
-  emitTradeAutomationStatus(`Scan finished. ${goHome?"Going back to the first STN page":"Refreshing the STN page"} and scanning again in ${Math.round(pause/1000)}s${idle?" (everything was checked recently)":""}. Press Stop to end this.`);
+  emitTradeAutomationStatus(`Scan finished. ${goHome?"Going back to the first STN page":"Refreshing the STN page"} and scanning again in ${Math.round(pause/1000)}s${idle?" (everything was checked recently)":""}. Click the running scan button to end this.`);
   if(!await autoRescanWait(token,pause))return;
   if(running)return;
   const stnTab=await getTabInfo(context.stnTabId);
