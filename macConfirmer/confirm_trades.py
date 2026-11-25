@@ -39,7 +39,7 @@ POINTER_RECHECKS = 3
 
 # Pointer positions measured with `cliclick p`.
 TRADE_OFFER = (1308, 578)
-CONFIRM_BUTTON = (1315, 911)
+CONFIRM_BUTTON = (1315, 850)
 
 # When the connection has timed out, the Steam app shows a retry button here.
 # It is clicked once at the start of every run, before anything else, and is
