@@ -13,6 +13,19 @@ if [ "$TERM_PROGRAM" = "Apple_Terminal" ]; then
   WINDOW_ID=$(osascript -e 'tell application "Terminal" to id of front window' 2>/dev/null)
 fi
 
+# Move this window to the top right corner of the main screen (keeps its size).
+if [ -n "$WINDOW_ID" ]; then
+  SCREEN_WIDTH=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); Math.round($.NSScreen.screens.objectAtIndex(0).frame.size.width)' 2>/dev/null)
+  if [ -n "$SCREEN_WIDTH" ]; then
+    osascript -e "tell application \"Terminal\"
+      set b to bounds of window id $WINDOW_ID
+      set w to (item 3 of b) - (item 1 of b)
+      set h to (item 4 of b) - (item 2 of b)
+      set bounds of window id $WINDOW_ID to {$SCREEN_WIDTH - w, 30, $SCREEN_WIDTH, 30 + h}
+    end tell" >/dev/null 2>&1
+  fi
+fi
+
 python3 browserShell/launch.py "$@"
 status=$?
 echo

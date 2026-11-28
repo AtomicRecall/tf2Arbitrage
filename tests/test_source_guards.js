@@ -17,6 +17,10 @@ const number = (source, name) => { const m = source.match(new RegExp("const " + 
 
 // Real money / real items
 ok(/^let tradeAutomationEnabled=false;/m.test(bg), "automatic trading defaults to off");
+// The checkbox is gone on purpose (owner's decision): scans trade only when a Steam Web API key is saved, and Scan Offline never does.
+ok(/autoTradesEnabled:steamApiKeyConfigured/.test(popup), "online scans enable trading only with a saved Steam Web API key");
+ok(!/getElementById\("autoTrades"\)|\$\("autoTrades"\)/.test(popup), "no auto-trade checkbox in the popup");
+ok(/if\(!offlineScan&&typeof m\.autoTradesEnabled==="boolean"\)/.test(bg), "Scan Offline never changes the trading switch");
 ok(bg.includes("await verifyPurchaseOfferCraftability(job,batchNumber,purchaseOfferId,steamApiKey);"), "a purchase offer is craftability-checked before it is accepted");
 ok(/waitForSteamOfferAccepted\(job,purchaseOfferId,steamApiKey\)/.test(bg), "a purchase waits for Steam state 3 (Accepted)");
 ok(/offlineScan/.test(bg) && /Offline scan: items are only checked/.test(bg), "Scan Offline stays check-only");
@@ -34,6 +38,23 @@ ok(/if\(!isSell&&humanSeller\)continue;/.test(content), "listings with an 'Add t
 
 // Profit / freshness thresholds are named constants (see AGENT.md 9.2 before changing)
 ok(number(bg, "MIN_PROFIT_REF") === 0.05 || /const MIN_PROFIT_REF=0\.05;/.test(bg), "minimum profit is 0.05 ref");
+
+// Classifieds first: the stats page is skipped for plain buy-side lookups, but kept for Unusuals
+ok(/const CLASSIFIEDS_FIRST=true;/.test(bg), "Backpack.tf Buy Orders are looked up on the Classifieds page first");
+ok(/const needsStatsPage=!CLASSIFIEDS_FIRST\|\|originalSpec\.quality==="Unusual";/.test(bg), "only Unusuals still use the stats page");
+ok(/const viaClassifieds=CLASSIFIEDS_FIRST&&resolved\.spec\.quality!=="Unusual";/.test(bg), "the sell-to-STN check reads the Classifieds page too");
+ok(/await sleep\(randomDelay\(BETWEEN_CLASSIFIED_PAGES_MIN,BETWEEN_CLASSIFIED_PAGES_MAX\)\);/.test(bg), "Classifieds paging keeps its delay");
+
+// The main window gets focus back after the scanner window opens
+ok(/await refocusMainWindow\(\);\n\s*setTimeout\(refocusMainWindow,700\);/.test(bg), "focus returns to the main window when the scanner window opens");
+
+// The queue card: background.js broadcasts the queue, the popup draws it and hides it when the scan ends
+ok(/function scanQueueView\(\)/.test(bg) && /popup\(\{type:"SCAN_QUEUE"/.test(bg), "background broadcasts the scan queue");
+ok(/scanQueue:scanQueueView\(\)/.test(bg), "GET_STATE carries the scan queue");
+ok(/m\.type==="SCAN_QUEUE"/.test(popup) && /function renderScanQueue/.test(popup) && /renderScanQueue\(null\)/.test(popup), "popup draws and clears the queue card");
+
+// Check saved items: scrap.tf items first, then STN
+ok(/queue=\[\.\.\.queue\.filter\(item=>item\.source==="scrap\.tf"\),\.\.\.queue\.filter\(item=>item\.source!=="scrap\.tf"\)\];/.test(bg), "saved scan checks scrap.tf items before STN items");
 
 // UI: no Stop button any more; the running scan button stops the scan
 ok(!fs.readFileSync(path.join(root, "tf2_trade_arbitrage_prototype/popup.html"), "utf8").includes('id="stop"'), "popup has no Stop button");

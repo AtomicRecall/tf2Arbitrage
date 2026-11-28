@@ -21,8 +21,6 @@
 .trader-details a:hover{text-decoration:underline}
 .trader-details>span{color:#ddd}
 .trader-details small{color:#999;font-size:9px}
-.automation-toggle{display:flex;align-items:flex-start;gap:8px;margin:8px 0;color:#f0d3a9;font-size:11px;line-height:1.4}
-.automation-toggle input{width:auto;flex:none;margin:1px 0 0;accent-color:#d38b32}
 .trade-status{margin:4px 0 8px;padding:7px;background:#191919;border:1px solid #080808;border-top-color:#555;border-left-color:#555;color:#d6a05b;font-size:10px;line-height:1.45;overflow-wrap:anywhere;white-space:pre-line}
 .trade-actions{display:flex;flex-wrap:wrap;gap:6px}
 .market-action-button{width:auto;flex:1 1 46%;margin:0;padding:6px 7px;font-size:9px;letter-spacing:.1px}
@@ -88,3 +86,22 @@ button.btn-pulse.btn-busy{animation:btn-pulse .6s ease-out,btn-busy .7s ease-in-
 .scan-sites{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;color:#f0d3a9;font-size:11px}
 .scan-sites label{display:flex;align-items:center;gap:4px;margin:0;color:#f0d3a9;font-size:11px}
 .scan-sites input{width:auto;flex:none;margin:0;accent-color:#d38b32}
+.scan-queue{margin:4px 0 8px;padding:8px;background:#191919;border:1px solid #080808;border-top-color:#555;border-left-color:#555}
+.scan-queue[hidden]{display:none}
+.queue-head{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;color:#e7a34b;text-transform:uppercase;letter-spacing:.6px}
+.queue-head span{color:#aaa;font-size:10px;text-transform:none;letter-spacing:0}
+.queue-bar{height:5px;margin:5px 0 8px;background:#2b2b2b;border:1px solid #080808}
+.queue-bar i{display:block;height:100%;background:linear-gradient(#d38b32,#a96825)}
+.queue-now{padding:7px 8px;margin-bottom:7px;background:linear-gradient(90deg,#3d4935,#2b3029);border-left:4px solid #7fc34a}
+.queue-now.idle{background:#2b2b2b;border-left-color:#777}
+.queue-label{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px}
+.queue-name{font-size:13px;font-weight:bold;color:#f0f0f0;margin-bottom:3px}
+.queue-line{font-size:11px;color:#ddd;margin:1px 0}
+.queue-step{margin-top:5px;font-size:10px;color:#d6a05b;overflow-wrap:anywhere}
+.queue-list{margin:3px 0 0;padding:0;list-style:none}
+.queue-list li{display:flex;gap:7px;align-items:flex-start;padding:4px 0;border-top:1px solid #2b2b2b;font-size:11px}
+.queue-pos{flex:none;min-width:24px;padding:1px 4px;text-align:center;background:#383838;border:1px solid #111;color:#e7a34b;font-size:10px;font-weight:bold}
+.queue-item{flex:1;min-width:0;overflow-wrap:anywhere}
+.queue-item-name{color:#eee}
+.queue-item small{display:block;color:#999;font-size:9px;margin-top:1px}
+.queue-more{margin-top:5px;font-size:10px;color:#aaa}

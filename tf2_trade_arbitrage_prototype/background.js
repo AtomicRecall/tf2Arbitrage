@@ -52,6 +52,8 @@ const BETWEEN_CLASSIFIED_PAGES_MAX=7000;
 const MAX_CLASSIFIEDS_PAGES=50;
 const CHECKPOINT_MS=5000;
 const MIN_PROFIT_REF=0.05;
+// Look bot Buy Orders up straight on the filtered Backpack.tf Classifieds page instead of opening the item's stats page first.
+const CLASSIFIEDS_FIRST=true;
 const MAX_LISTING_ACTIVITY_AGE_MS=10*60*60*1000;
 // One bot offer may be rebuilt after up to three page-refresh retries, so allow
 // enough time for several full attempts.
@@ -149,17 +151,25 @@ function ensureAutomationWindow(){
       throw lastError||new Error("Firefox did not return a scanner window.");
     }
     automationWindowId=created.id;
-    // Some Firefox versions reject the "focused" option, so the new window can
-    // come up in front. Hand focus straight back to the user's window.
-    if(!openedUnfocused&&Number.isInteger(sourceWindowId)&&sourceWindowId!==created.id){
-      try{await updateWindow(sourceWindowId,{focused:true})}catch(error){}
-    }
+    // Some Firefox versions reject or ignore the "focused" option, so the new window can
+    // come up in front, sometimes a moment after it exists. Hand focus back to the user's
+    // main window straight away and once more shortly after.
+    await refocusMainWindow();
+    setTimeout(refocusMainWindow,700);
     // The new window may have covered iPhone Mirroring on the Mac; bring that
     // app back to the front (it does not wait for the answer).
     refocusIPhoneMirroring();
     return automationWindowId;
   })().finally(()=>{automationWindowPromise=null});
   return automationWindowPromise;
+}
+
+// Puts the user's main window back in front. Skipped while the scanner window was raised on
+// purpose (a page of it reported itself hidden, see ensureScanTabVisible).
+async function refocusMainWindow(){
+  if(automationWindowRaised||!Number.isInteger(sourceWindowId)||sourceWindowId===automationWindowId)return;
+  if(!await getWindowIfOpen(sourceWindowId))return;
+  try{await updateWindow(sourceWindowId,{focused:true})}catch(error){}
 }
 
 // Falls back to the user's own window only if the scanner window cannot be
@@ -443,6 +453,7 @@ function filteredClassifiedsPageUrl(value){
 
 function emitTradeAutomationStatus(message){
   tradeAutomationMessage=String(message||"");
+  if(running&&scanItemBusy&&scanCurrentItem&&tradeAutomationMessage.includes(scanCurrentItem.name))scanStepText=tradeAutomationMessage;
   const state=getTradeAutomationState();
   popup({type:"TRADE_AUTOMATION_STATUS",state});
   saveState({tradeAutomation:state});
@@ -2792,6 +2803,7 @@ function storageGet(defaults){
 function saveState(extra={}){
   const state={version:EXTENSION_VERSION,running,total,checked,queueLength:queue.length,keyRate,results,updatedAt:Date.now(),...extra};
   saveChain=saveChain.then(()=>storageSet({scanState:state}));
+  emitScanQueue();
   return saveChain;
 }
 
@@ -3142,9 +3154,12 @@ async function processReverseItem(item){
   }
 
   const resolved=await bpUrlAsync(item.name);
-  const backpackUrl=resolved.url;
+  // Classifieds first (see CLASSIFIEDS_FIRST): the sell listings come from the filtered Classifieds page
+  // with intent=sell. Unusuals keep the stats page, which carries the effect.
+  const viaClassifieds=CLASSIFIEDS_FIRST&&resolved.spec.quality!=="Unusual";
+  const backpackUrl=viaClassifieds?classifiedsUrl(item.name,null,"sell"):resolved.url;
   base.backpackUrl=backpackUrl;
-  base.attempts=[{name:item.name,url:backpackUrl,source:"stats",status:"opened"}];
+  base.attempts=[{name:item.name,url:backpackUrl,source:viaClassifieds?"classifieds":"stats",status:"opened"}];
   // The forward check of this item may have read the sell listings from the same stats page already.
   let data=itemData(item.name).bpSell?.data||null;
   if(!data)try{
@@ -3152,7 +3167,7 @@ async function processReverseItem(item){
     ownedTabIds.add(tab.id);
     ownedTabUrls.set(tab.id,backpackUrl);
     currentTabId=tab.id;
-    if(await loadBackpackPage(tab.id,backpackUrl))data=await readSellListingsWhenStable(tab.id,item.name,resolved.spec);
+    if(await loadBackpackPage(tab.id,backpackUrl))data=await readSellListingsWhenStable(tab.id,viaClassifieds?resolved.spec.itemName:item.name,resolved.spec);
   }catch(error){
     console.warn("Could not read the Backpack.tf sell listings:",error);
   }finally{
@@ -3543,8 +3558,9 @@ async function readStatsBuyOrders(tabId,itemName,desiredSpec=null){
   try{return await msgTab(tabId,{type:"READ_STATS_BUY_ORDERS",itemName,desiredSpec})}catch(e){return null}
 }
 
-function classifiedsUrl(itemName){
+function classifiedsUrl(itemName,forcedState=null,intent=""){
   const spec=getBackpackSpec(itemName);
+  const quality=forcedState?.quality||spec.quality,craftability=forcedState?.craftability||spec.craftability;
 
   // Use Backpack.tf's full generic Buy Orders filter. This deliberately
   // mirrors the useful filters from the expanded Classifieds link instead of
@@ -3561,15 +3577,16 @@ function classifiedsUrl(itemName){
   };
   const params=new URLSearchParams({
     item:spec.itemName,
-    quality:String(qualityIds[spec.quality]??6),
+    quality:String(qualityIds[quality]??6),
     tradable:"1",
-    craftable:spec.craftability==="Non-Craftable"?"-1":"1",
+    craftable:craftability==="Non-Craftable"?"-1":"1",
     australium:"-1",
     killstreak_tier:"0",
     spell:"None",
     offers:"1",
     paint:"None"
   });
+  if(intent)params.set("intent",intent);
   return `https://backpack.tf/classifieds?${params.toString()}`;
 }
 
@@ -3642,10 +3659,10 @@ async function openAndHighlightBackpackPages(listings,itemName,preferredUrl,wind
   return opened;
 }
 
-async function readClassifiedsLink(tabId,itemName){
+async function readClassifiedsLink(tabId,itemName,forcedState=null){
   // The correct expanded Buy Orders URL can be built deterministically from
   // the item name, so do not depend on the stats page exposing its expand link.
-  return {href:classifiedsUrl(itemName)};
+  return {href:classifiedsUrl(itemName,forcedState)};
 }
 
 function safeNextClassifiedsUrl(rawHref,currentUrl){
@@ -3699,21 +3716,25 @@ async function closeAllOwnedTabs(){
   if(remaining.length)await Promise.all(remaining.map(id=>closeTabRobust(id)));
 }
 
-async function openAndReadClassifieds(statsTabId,itemName,buyRefValue=null){
-  const searchSpec=await getBackpackSpecAsync(itemName);
-  const statsData=await readStatsBuyOrders(statsTabId,searchSpec.itemName,searchSpec);
-  const statsListings=Array.isArray(statsData?.listings)?statsData.listings:[];
-
-  // Close the stats tab before opening Classifieds, then combine both result
-  // sources so a stats-page hit does not hide other profitable offers.
-  if(currentTabId===statsTabId){
-    await closeCurrentTab();
-  }else{
-    await closeTabRobust(statsTabId);
+async function openAndReadClassifieds(statsTabId,itemName,buyRefValue=null,forcedState=null){
+  let searchSpec=await getBackpackSpecAsync(itemName);
+  if(forcedState)searchSpec={...searchSpec,quality:forcedState.quality||searchSpec.quality,craftability:forcedState.craftability||searchSpec.craftability};
+  // statsTabId null = Classifieds first: no stats page was opened, the Classifieds pages are the only source.
+  let statsListings=[];
+  if(statsTabId!==null){
+    const statsData=await readStatsBuyOrders(statsTabId,searchSpec.itemName,searchSpec);
+    statsListings=Array.isArray(statsData?.listings)?statsData.listings:[];
+    // Close the stats tab before opening Classifieds, then combine both result
+    // sources so a stats-page hit does not hide other profitable offers.
+    if(currentTabId===statsTabId){
+      await closeCurrentTab();
+    }else{
+      await closeTabRobust(statsTabId);
+    }
   }
   if(!running)return null;
 
-  const linkData=await readClassifiedsLink(null,itemName);
+  const linkData=await readClassifiedsLink(null,itemName,forcedState);
   if(!linkData?.href){
     return {
       listings:statsListings,
@@ -3836,6 +3857,31 @@ function marketplaceUrl(itemName){
 // The item being checked right now, so a failure can be reported against it.
 let scanCurrentItem=null;
 let scanStepErrors=0;
+// What the popup's queue card shows: the item being checked, its site, the step it is on, and the next items.
+let scanStepText="";
+const SCAN_QUEUE_SHOWN=8;
+function scanItemKind(item){
+  if(item.reverse)return "Sell to STN: buy on Backpack.tf, sell to STN";
+  if(item.scrapToStn)return "Buy on scrap.tf, sell to STN";
+  if(item.fromSaved)return `Saved item: ${item.source==="scrap.tf"?"scrap.tf":"STN"} price against Backpack.tf`;
+  return `Buy on ${item.source==="scrap.tf"?"scrap.tf":"STN"}, sell to Backpack.tf bots`;
+}
+function scanQueueEntry(item,position){
+  return {name:item.name,source:item.source==="scrap.tf"?"scrap.tf":"stn",kind:scanItemKind(item),position,price:item.price||""};
+}
+function scanQueueView(){
+  const busy=running&&scanItemBusy&&scanCurrentItem;
+  const first=Math.min(Math.max(total,1),checked+1);
+  const shown=queue.slice(0,SCAN_QUEUE_SHOWN);
+  return {
+    running:Boolean(running),total,checked,
+    current:busy?scanQueueEntry(scanCurrentItem,first):null,
+    step:busy?scanStepText:"",
+    upcoming:shown.map((item,index)=>scanQueueEntry(item,first+(busy?1:0)+index)),
+    more:Math.max(0,queue.length-shown.length)
+  };
+}
+function emitScanQueue(){popup({type:"SCAN_QUEUE",queue:scanQueueView()})}
 const SCAN_MAX_STEP_ERRORS=5;
 
 // One step of the scan. An unexpected error used to end the chain silently (the
@@ -3927,6 +3973,7 @@ async function nextInner(){
 
   const item=queue.shift();
   scanCurrentItem=item;
+  scanStepText="Starting…";
   await saveState({finished:false});
   if(!running){scanItemBusy=false;return}
 
@@ -4068,6 +4115,25 @@ async function nextInner(){
     for(let attempt=0;attempt<namesToTry.length&&running;attempt++){
       searchedName=namesToTry[attempt];
       const fallbackState=attempt===0?null:originalSpec;
+      // Classifieds first: go straight to the filtered Classifieds page. The stats page is only still used
+      // for Unusuals (it carries the effect, the Classifieds link here does not). The sell listings of the
+      // sell-to-STN check are read on their own Classifieds page (see processReverseItem).
+      const needsStatsPage=!CLASSIFIEDS_FIRST||originalSpec.quality==="Unusual";
+      if(!needsStatsPage){
+        emitTradeAutomationStatus(`Checking ${searchedName}: opening its Backpack.tf Classifieds page directly…`);
+        data=await openAndReadClassifieds(null,searchedName,parsePrice(item.price)?.refValue??null,fallbackState);
+        if(!running)break;
+        if(data?.source==="classifieds"&&data.url){
+          const pageNote=`${data.pagesChecked} page${data.pagesChecked===1?"":"s"}${data.stoppedEarly?", stopped once prices fell below profit":""}`;
+          attempts.push({name:searchedName,url:data.url,source:"classifieds",status:data.paginationError
+            ?`partial (${pageNote}): ${data.paginationError}`
+            :`${data.listings?.length?"found":"no-match"} (${pageNote})`});
+        }else attempts.push({name:searchedName,url:classifiedsUrl(searchedName,fallbackState),source:"classifieds",status:"failed"});
+        if(data&&data.listings&&data.listings.length)break;
+        await closeCurrentTab();
+        if(attempt===0&&namesToTry.length>1)await sleep(randomDelay(2500,4500));
+        continue;
+      }
       const resolved=await bpUrlAsync(searchedName,fallbackState);
       const backpackUrl=resolved.url;
       attempts.push({name:searchedName,url:backpackUrl,source:"stats",status:"opened"});
@@ -4412,6 +4478,8 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       queue=saved.map(entry=>entry.source==="scrap.tf"
         ?{name:entry.name,price:entry.buyPrice||"",stock:null,href:entry.sourceHref||SCRAP_BUY_URL,source:"scrap.tf",scrapValue:entry.scrapValue||null,fromSaved:true}
         :{name:entry.name,price:entry.buyPrice||"",stock:null,href:marketplaceUrl(entry.name),fromSaved:true});
+      // All saved scrap.tf items first (they are answered from one read of the Buy Hats list), then the STN ones.
+      queue=[...queue.filter(item=>item.source==="scrap.tf"),...queue.filter(item=>item.source!=="scrap.tf")];
       scrapPageCache=null;
       total=queue.length;checked=0;running=true;results=[];notifiedDeals.clear();endSoundPlayed=false;
       await saveState({running:true,checked:0,total,queueLength:queue.length,lastResult:null,finished:false});
@@ -4628,6 +4696,7 @@ api.runtime.onMessage.addListener((m,s,sendResponse)=>{
       state:v.scanState,
       scanMode:currentScanMode(),
       version:EXTENSION_VERSION,
+      scanQueue:scanQueueView(),
       tradeAutomation:getTradeAutomationState()
     })).catch(()=>sendResponse({state:null,version:EXTENSION_VERSION,tradeAutomation:getTradeAutomationState()}));
     return true;

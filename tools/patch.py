@@ -24,6 +24,7 @@ Paths are relative to the repo root (the folder above tools/). Write `old` and
 """
 import json
 import os
+import shutil
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -50,6 +51,8 @@ def edit(path, pairs, root=ROOT):
     temporary = full + ".tmp"
     with open(temporary, "w", encoding="utf-8", newline="") as handle:
         handle.write(out)
+    # The temporary file would otherwise drop the original's permissions (the .command launcher's executable bit).
+    shutil.copymode(full, temporary)
     os.replace(temporary, full)
     return len(pairs)
 

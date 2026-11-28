@@ -8,7 +8,7 @@ Read this file fully before changing anything. It explains what the code does, h
 
 This project spends **real Steam items** and sends **real trade offers** from the user's account.
 
-1. **Never enable automatic trading** (`tradeAutomationEnabled`) in any test, script or default. It defaults to `false`; keep it that way.
+1. **Never enable automatic trading** (`tradeAutomationEnabled`) in any test or script. The background defaults to `false`. By the owner's decision there is no checkbox any more: the popup sends `autoTradesEnabled:steamApiKeyConfigured` with every online scan, so scans trade once a Steam Web API key is saved. Keep that key check, and keep Scan Offline from ever trading.
 2. **Use Offline mode when testing scans.** `offlineScan=true` (the "Scan Offline" button) saves Good Trades but buys nothing and sends nothing. See `enqueueTradeJob()`.
 3. **Use dry-run for the Mac helper.** `confirm_server.py --dry-run`, `confirm_trades.py N --dry-run`, `launch.py --server-dry-run`. Never run the real clicker in tests.
 4. **Never commit or print secrets:** `.env.local` (Steam API key, session secret), `macConfirmer/server_config.json` (token + ntfy topic), the Steam Web API key kept in extension storage (`steamWebApiKey`). Do not paste their values into code, docs or logs. If you see them, leave them alone.

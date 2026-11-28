@@ -1,5 +1,5 @@
 TF2 Trade Arbitrage Prototype - Firefox MV2
-Current version 0.7.150
+Current version 0.7.156
 
 Workflow:
 - Reads all TF2 marketplace items from the current page.
@@ -12,6 +12,26 @@ Workflow:
 - Runs slowly and conservatively to reduce Backpack.tf rate-limit problems.
 - Optional automatic execution buys the distinct-copy count on STN, waits for Steam to confirm the purchase, then submits one separate offer to each qualifying bot.
 - Trade jobs are serialized independently from scanning and run in the original Firefox window; automatic execution is opt-in.
+
+V0.7.156 changes:
+- Check saved items now checks every saved scrap.tf item first and then the saved STN items (before, they ran in the order of the saved list, mixed). Each group keeps its own order.
+
+V0.7.155 changes:
+- The Scan queue card now sits where the grey trade-status box used to be, right under the key-rate and volume settings, and replaces it: what a running scan is doing is shown in the card. The old box only appears for a running or queued trade, or for a notice while no scan runs.
+- The "Automatically buy items and send bot offers" checkbox is gone, by the owner's decision. Every Scan Pages / Scan No Sell / Check saved items run now trades automatically as soon as a Steam Web API key is saved (the same key check the checkbox made, without the confirmation question). Without a saved key a scan only finds and saves Good Trades, and says so. Scan Offline never buys or sends anything. The background still starts with automatic trading off until a scan sets it.
+
+V0.7.154 changes:
+- Readable scan queue. While a scan runs, a Scan queue card under the counters shows the hat being checked right now ("Now checking"), the website it comes from (stntrading.eu or scrap.tf), which kind of check it is (buy on STN or scrap.tf and sell to Backpack.tf bots, sell to STN, or a saved item), its place in the queue (for example 12 of 80), what it is doing at the moment (the latest status line for that hat) and a progress bar. Below it "Up next" lists the next 8 items with their numbers, websites and kind of check, plus how many more follow. It disappears when the scan ends or is stopped, and reappears if the popup or sidebar is opened mid-scan. Display only: the scan order and delays are unchanged.
+- The Terminal window that TF2 Trader.command runs in moves to the top right corner of the screen when it starts (Terminal.app only).
+
+V0.7.153 changes:
+- Classifieds first, everywhere. The stats page (backpack.tf/stats/Unique/...) was still opened for the sell-to-STN check, and for the visit that read the sell listings together with the Buy Orders. Both now use the filtered Classifieds link too: the buy check reads Buy Orders as before, and the sell-to-STN check opens the same link with intent=sell. The stats page is now only opened for Unusual hats (it carries the effect) or when `CLASSIFIEDS_FIRST` is switched off. The sell-to-STN check still reads one page, as before, so the number of Backpack.tf loads per item does not go up.
+
+V0.7.152 changes:
+- Main window stays in front. When the TF2 Arbitrage Scanner window opens, focus is handed back to your main window right away and once more 0.7 s later (Firefox sometimes brings a new window forward after it exists, or ignores the "open unfocused" request). This used to be done only when Firefox rejected that request. It is skipped while the scanner window was raised on purpose because a page of it reported itself hidden (STN and Steam need a visible page).
+
+V0.7.151 changes:
+- Classifieds first. The Buy Orders of an item are now looked up straight on its filtered Backpack.tf Classifieds page (the same link as before: tradable, no paint, no spell, no Killstreak, no Australium, offers on) instead of opening the item's stats page first and then Classifieds. That is one Backpack.tf page load less per item. The stats page is still opened for Unusual hats (it carries the effect) and for the one visit that also reads the sell listings for the sell-to-STN check. The delays between items and between Classifieds pages are unchanged, and paging still stops once prices fall below the profit line. The name fallback (the item name without its first word) uses the same Classifieds link with the original quality and craftability. The result card now lists the Classifieds link as the Backpack.tf attempt. `CLASSIFIEDS_FIRST` in background.js switches this off.
 
 V0.7.150 changes:
 - No Stop button. The scan button that is running is its own Stop button: it says "running… (click to stop)" and clicking it again stops the scan (this holds for Scan Pages, Scan No Sell, Scan Offline and Check saved items). The other scan buttons stay switched off while a scan runs, as before.

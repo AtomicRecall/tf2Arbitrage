@@ -17,11 +17,8 @@
     <input id="volume" type="range" min="0" max="100" step="1" value="40">
     <strong id="volumeValue">40%</strong>
   </div>
-  <label class="automation-toggle">
-    <input id="autoTrades" type="checkbox">
-    <span>Automatically buy items and send bot offers</span>
-  </label>
-  <div id="tradeStatus" class="trade-status" role="status" aria-live="polite">Automatic trading is off. Enable it to execute future Good Trades.</div>
+  <div id="scanQueue" class="scan-queue" hidden aria-live="polite"></div>
+  <div id="tradeStatus" class="trade-status" role="status" aria-live="polite" hidden></div>
   <details id="steamApiSettings" class="api-settings" open>
     <summary>Steam Web API key (required for STN and scrap.tf purchase checks)</summary>
     <p class="api-key-info">The key is stored in this extension's local storage and used by its background script to query Steam directly. It is never sent to page scripts. Do not share it in chat. Mobile confirmation remains manual.</p>

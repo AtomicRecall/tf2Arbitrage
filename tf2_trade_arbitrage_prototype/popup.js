@@ -3,7 +3,7 @@ const api=typeof browser!=="undefined"?browser:chrome;
 // panel's width instead of the popup's fixed one.
 if(new URLSearchParams(location.search).get("mode")==="sidebar")document.documentElement.classList.add("sidebar");
 const $=id=>document.getElementById(id);
-const scan=$("scan"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),autoTrades=$("autoTrades"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
+const scan=$("scan"),rate=$("keyRate"),volume=$("volume"),volumeValue=$("volumeValue"),tradeStatus=$("tradeStatus"),steamApiSettings=$("steamApiSettings"),steamApiKey=$("steamApiKey"),saveSteamApiKey=$("saveSteamApiKey"),clearSteamApiKey=$("clearSteamApiKey"),steamApiKeyStatus=$("steamApiKeyStatus"),status=$("status"),results=$("results"),unverifiedResults=$("unverifiedResults"),tradersView=$("tradersView"),total=$("total"),checked=$("checked"),deals=$("deals");
 const scanSaved=$("scanSaved"),savedList=$("savedList"),savedCount=$("savedCount"),clearSaved=$("clearSaved");
 const boughtView=$("boughtView"),tabBought=$("tabBought");
 const checkedView=$("checkedView"),tabChecked=$("tabChecked");
@@ -38,7 +38,6 @@ api.storage.local.get({keyRate:63,dismissedItems:[],notificationVolume:DEFAULT_V
 });
 function renderTradeAutomation(state){
   if(!state)return;
-  autoTrades.checked=Boolean(state.enabled);
   const queued=Number(state.queued)||0;
   const lines=[];
   if(state.active){
@@ -99,10 +98,13 @@ function renderTradeAutomation(state){
       lines.push(`OFFER PAGE SIGNAL: ${pageLabel}`);
     }
   }
-  lines.push(`${queued} queued`);
-  if(state.message&&state.message!==state.active?.purchaseProgress?.message)lines.push(state.message);
-  else if(!state.active)lines.push(state.enabled?"Automatic trading is enabled.":"Automatic trading is off.");
+  // The scan queue card shows what a running scan is doing; this box is only for trades (and for notices
+  // while no scan runs), so it stays hidden when there is nothing to say.
+  const message=state.message&&state.message!==state.active?.purchaseProgress?.message?state.message:"";
+  if(state.active||queued>0){lines.push(`${queued} queued`);if(message)lines.push(message)}
+  else if(!scanQueueRunning&&message)lines.push(message);
   tradeStatus.textContent=lines.join("\n");
+  tradeStatus.hidden=!lines.length;
 }
 function renderSteamApiKeyStatus(configured,message){
   steamApiKeyConfigured=Boolean(configured);
@@ -436,6 +438,7 @@ function hydrate(state){
   if(r?.version) $("version").textContent=`v${r.version}`;
   if(r?.state) hydrate(r.state);
   if(r?.tradeAutomation)renderTradeAutomation(r.tradeAutomation);
+  renderScanQueue(r?.scanQueue);
   applyScanMode(r?.scanMode||null);
 })();
 
@@ -567,24 +570,6 @@ testMac.onclick=async()=>{
   }
 };
 
-autoTrades.onchange=async()=>{
-  if(autoTrades.checked&&!steamApiKeyConfigured){
-    autoTrades.checked=false;
-    tradeStatus.textContent="Save a Steam Web API key before enabling STN purchases. The key is checked before QuickBuy; manual mobile confirmation is still required.";
-    steamApiSettings.open=true;
-    return;
-  }
-  if(autoTrades.checked&&!window.confirm("This enables automatic STN purchases and bot offers only for price-profitable listings verified to have enough metal. Steam Web API state 3 (Accepted) is required before bot offers are sent. You must still approve mobile confirmations yourself. Continue?")){
-    autoTrades.checked=false;
-    return;
-  }
-  const response=await setTradeAutomation(autoTrades.checked);
-  if(!response?.ok){
-    autoTrades.checked=false;
-    tradeStatus.textContent="Could not update automatic trading. Please try again.";
-  }
-};
-
 volume.oninput=()=>{
   const v=Math.max(0,Math.min(100,Number(volume.value)||0));
   volumeValue.textContent=`${v}%`;
@@ -682,8 +667,14 @@ scanSaved.onclick=()=>{
 };
 async function startScan(type,extra={},mode=null){
   api.storage.local.set({keyRate:+rate.value||63});
-  const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:autoTrades.checked});
+  // There is no on/off checkbox any more: scans trade automatically once a Steam Web API key is saved
+  // (Scan Offline never trades, whatever is sent here). Without a key a scan only finds and saves Good Trades.
+  const r=await send({...extra,type,keyRate:+rate.value||63,notificationVolume:(Number(volume.value)||0)/100,autoTradesEnabled:steamApiKeyConfigured});
   if(!r?.ok){status.textContent=r?.error||"Could not start scan.";syncScanMode();return}
+  if(!steamApiKeyConfigured&&mode!=="offline"){
+    tradeStatus.textContent="No Steam Web API key is saved, so this scan only finds and saves Good Trades. Nothing is bought until you save a key (Steam Web API key section).";
+    tradeStatus.hidden=false;
+  }
   if(mode)applyScanMode(mode);
   results.innerHTML="";
   unverifiedResults.innerHTML="";
@@ -696,7 +687,7 @@ async function startScan(type,extra={},mode=null){
   const sourceText=Object.entries(r.sources||{}).map(([name,count])=>name==="stn-reverse"?`${count} STN buy-price checks`:`${count} from ${name==="scrap.tf"?"scrap.tf":"STN"}`).join(", ");
   status.textContent=`Checking ${r.alreadyChecked||0} / ${r.total} items${sourceText?` (${sourceText})`:""}${r.alreadyChecked?`, ${r.alreadyChecked} already checked in the last 60 minutes and skipped`:""}...`;
 }
-async function stopScanClicked(){await send({type:"STOP_SCAN"});applyScanMode(null);status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
+async function stopScanClicked(){await send({type:"STOP_SCAN"});applyScanMode(null);renderScanQueue(null);status.textContent=`Stopped at ${checked.textContent} / ${total.textContent}. Progress saved.`}
 
 api.runtime.onMessage.addListener(async m=>{
   if(m.type==="TRADE_AUTOMATION_STATUS"){
@@ -712,7 +703,9 @@ api.runtime.onMessage.addListener(async m=>{
     if((m.result.deal||m.result.reverseDeal)&&!isDismissed(m.result.name)) deals.textContent=+deals.textContent+1;
     status.textContent=`${m.checked} / ${m.total} checked`;
   }
+  if(m.type==="SCAN_QUEUE")renderScanQueue(m.queue);
   if(m.type==="SCAN_FINISHED"){
+    renderScanQueue(null);
     status.textContent=`Finished: ${m.checked} / ${m.total} items checked.`;
     syncScanMode();
   }
@@ -775,6 +768,33 @@ api.storage.onChanged?.addListener((changes,area)=>{
 
 // ---- Source badge and the Bought tab -----------------------------------------
 function sourceLabel(source){return source==="scrap.tf"?"scrap.tf":"STN"}
+function sourceSite(source){return source==="scrap.tf"?"scrap.tf":"stntrading.eu"}
+// The queue card: which hat is being checked, from which website, where it is in the queue, and what comes next.
+const scanQueueBox=$("scanQueue");
+let scanQueueRunning=false;
+function renderScanQueue(q){
+  scanQueueRunning=Boolean(q&&q.running);
+  if(!scanQueueRunning){scanQueueBox.hidden=true;scanQueueBox.textContent="";return}
+  const done=Number(q.checked)||0,all=Number(q.total)||0,percent=all?Math.min(100,Math.round(done/all*100)):0;
+  const cur=q.current;
+  let html=`<div class="queue-head"><b>Scan queue</b><span>${done} of ${all} checked</span></div><div class="queue-bar"><i style="width:${percent}%"></i></div>`;
+  if(cur){
+    html+=`<div class="queue-now"><div class="queue-label">Now checking</div><div class="queue-name">${esc(cur.name)}${sourceBadge(cur.source)}</div>`+
+      `<div class="queue-line">From <b>${esc(sourceSite(cur.source))}</b> · place <b>${cur.position}</b> of ${all} in the queue</div>`+
+      `<div class="queue-line">${esc(cur.kind)}${cur.price?` · ${esc(cur.price)}`:""}</div>`+
+      `<div class="queue-step">${esc(q.step||"Starting…")}</div></div>`;
+  }else{
+    html+=`<div class="queue-now idle"><div class="queue-label">Between items</div><div class="queue-step">Waiting a few seconds before the next item (this keeps the sites from blocking the scanner).</div></div>`;
+  }
+  const upcoming=Array.isArray(q.upcoming)?q.upcoming:[];
+  if(upcoming.length){
+    html+=`<div class="queue-label">Up next</div><ol class="queue-list">`+upcoming.map(item=>
+      `<li><span class="queue-pos">${item.position}</span><span class="queue-item"><span class="queue-item-name">${esc(item.name)}</span>${sourceBadge(item.source)}<small>${esc(item.kind)}</small></span></li>`).join("")+`</ol>`;
+    if(q.more>0)html+=`<div class="queue-more">+ ${q.more} more after these</div>`;
+  }else if(cur)html+=`<div class="queue-more">This is the last item in the queue.</div>`;
+  scanQueueBox.innerHTML=html;
+  scanQueueBox.hidden=false;
+}
 function sourceBadge(source){
   if(!source)return "";
   return ` <span class="source-badge ${source==="scrap.tf"?"scrap":"stn"}">${esc(sourceLabel(source))}</span>`;

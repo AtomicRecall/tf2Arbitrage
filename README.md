@@ -6,7 +6,7 @@ Backpack.tf buy-order bots**, and can carry out the whole trade for you.
 
 > **Use at your own risk.** With automatic trading on, this spends real items and
 > sends real Steam trade offers from your account. Read "Safety" below first, start
-> with automatic trading **off**, and try one cheap hat before trusting it.
+> with **Scan Offline** (it never trades), and try one cheap hat before trusting it.
 > Automating third-party sites may break their rules; that is your responsibility.
 
 ---
@@ -16,8 +16,9 @@ Backpack.tf buy-order bots**, and can carry out the whole trade for you.
 1. **Reads a marketplace.** It reads every hat on the STN hats listing
    (`stntrading.eu`) and on scrap.tf's Buy Hats page (`scrap.tf/buy/hats`), with
    the price and how many are in stock.
-2. **Looks up the sell side.** For each hat it opens the Backpack.tf stats and
-   classifieds pages and collects the **buy orders placed by bots** (listings with
+2. **Looks up the sell side.** For each hat it opens its filtered Backpack.tf
+   classifieds page directly (the stats page is only used for Unusuals; the sell-to-STN
+   check uses the same link with the sell listings) and collects the **buy orders placed by bots** (listings with
    the "Please only offer the buyout" button). It ignores listings that want a
    special version of the hat: parts attached, spells, paint, and similar.
 3. **Finds profit.** A hat is a *price-profitable* hit when the best bot buy order
@@ -89,7 +90,8 @@ python3 browserShell/launch.py                    # real run
 
 The launcher packs both add-ons into their own Firefox profile (logins and settings are
 kept between runs), opens STN and scrap.tf as tabs, starts the confirm server and fills in the
-Mac confirmer settings for you. You can also double-click `browserShell/TF2 Trader.command`.
+Mac confirmer settings for you. You can also double-click `browserShell/TF2 Trader.command`;
+its Terminal window moves to the top right corner of the screen so it stays out of the way.
 Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
 
 ---
@@ -98,7 +100,8 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
 
 1. Set **1 key = ... ref** to the current key price.
 2. Paste your **Steam Web API key** and press *Save key*.
-3. Leave **Automatically buy items and send bot offers** *off* until you have watched a few scans.
+3. Automatic trading has no switch: every scan except **Scan Offline** trades as soon as a Steam Web API key is
+   saved. Watch a few **Scan Offline** runs first, and remove the saved key if you want scans that never trade.
 4. Optional: set the sound volume, and decide whether to **skip scrap.tf's Craft Hats**
    section (on by default; it is hundreds of cheap hats that are almost never profitable).
 
@@ -118,7 +121,7 @@ Full details: [`browserShell/SETUP.md`](browserShell/SETUP.md).
    **Scan No Sell** is the same scan without the "sell to STN" direction: it only checks buying from the
    marketplace and selling to a bot on Backpack.tf. **Scan Offline** does that too, but only checks: Good
    Trades are saved (see *Saved Good Trades*), and nothing is bought and no offer is sent, whatever the
-   automatic-trading checkbox says. A separate **TF2 Arbitrage Scanner** window opens for the
+   Steam Web API key is saved. A separate **TF2 Arbitrage Scanner** window opens for the
    Backpack.tf and Steam pages and closes when the work is done. Keep it open and visible.
 3. Watch the result tabs:
 
@@ -155,8 +158,8 @@ directions are checked back to back (forward check, then this one), so a hat is 
 
 ### Automatic trading
 
-Tick **Automatically buy items and send bot offers** (a Steam Web API key is required). For each
-Good Trade the bot then:
+Automatic trading runs on every scan except **Scan Offline** once a Steam Web API key is saved (there is no
+checkbox; without a key a scan only finds and saves Good Trades). For each Good Trade the bot then:
 
 1. buys the hat on the cheaper site (STN or scrap.tf),
 2. accepts the Steam offer and waits for the Steam Web API to report *Accepted*
@@ -206,7 +209,7 @@ page finishes, the add-on refreshes that STN tab, presses PageDown 3 times and s
 (`https://stntrading.eu/tf2/hats?products_price_desc%5BsortBy%5D=products_time_desc&products_price_desc%5Bpage%5D=1`)
 instead of refreshing, presses PageDown 3 times and scans that, then the count of 3 starts again.
 
-When the scanner window opens it comes up on top of iPhone Mirroring, so the add-on then asks the confirm server
+When the scanner window opens, focus goes straight back to your main window (the scanner window is only raised again if its pages report themselves hidden, because STN and Steam need a visible page); it also comes up on top of iPhone Mirroring, so the add-on then asks the confirm server
 (`POST /focus`) to bring iPhone Mirroring back to the front. This only happens when the Mac confirmer is set up
 in the popup, and nothing is clicked.
 
@@ -227,7 +230,7 @@ checked again as soon as its 60 minutes are up or its price on that site changes
 
 Every Good Trade, from STN or scrap.tf, and every hat the bot bought is saved in the browser (bought ones carry a **Bought ×N** badge). **Check saved items** reopens each one
 on the site it was found on and on Backpack.tf and runs
-the normal check again. Saved scrap.tf items are all answered from one read of the scrap.tf Buy Hats page (one tab, no waiting per item); saved STN items open their own STN page. A saved item that is checked again and is no longer a Good Trade (its price rose, or nobody buys it) is removed from the list automatically; checks that failed to load keep the item.
+the normal check again. Saved scrap.tf items are checked first, all answered from one read of the scrap.tf Buy Hats page (one tab, no waiting per item); then the saved STN items, each opening its own STN page. A saved item that is checked again and is no longer a Good Trade (its price rose, or nobody buys it) is removed from the list automatically; checks that failed to load keep the item.
 While it runs the status box names the item being checked and why one could not be read (a page that did not load is tried twice, and after three in a row the check pauses for 45 seconds), and when it ends it summarises how many saved items are still good, were removed, or could not be checked.
 
 ### Mac confirmer
@@ -296,7 +299,7 @@ may differ (24), `--no-phone-check` ignores the saved spot.
 
 ## Safety and limits
 
-- **It moves real items.** Automatic trading is off by default and only acts on trades whose
+- **It moves real items.** Automatic trading needs a saved Steam Web API key (and never runs in Scan Offline); it only acts on trades whose
   buyer was verified to have enough metal and whose purchase the Steam Web API reported *Accepted*.
 - Before pressing scrap.tf's cart button it checks the price has not risen since the scan, that nothing
   else is selected, and that the item is exactly the one wanted.
@@ -317,7 +320,7 @@ may differ (24), `--no-phone-check` ignores the saved spot.
 | Symptom | Try |
 | --- | --- |
 | "No TF2 marketplace items found" | Open the STN hats listing or `scrap.tf/buy/hats` (signed in), let it finish loading, scan again. |
-| Auto trading will not switch on | Save a Steam Web API key first. |
+| Scans find Good Trades but buy nothing | Save a Steam Web API key first (the notice under the settings says so); Scan Offline never buys. |
 | scrap.tf purchase says the item list is missing | You are not signed in to scrap.tf in that browser. |
 | Offer accepted but the Mac does nothing | Check the status line for "Asked the Mac to confirm" and the confirm server output; use *Test connection*; make sure the server is not in dry-run mode. |
 | Confirm clicks land in the wrong place | Re-measure the coordinates in `macConfirmer/confirm_trades.py` with `cliclick p`. |

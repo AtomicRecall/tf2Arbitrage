@@ -39,7 +39,7 @@ POINTER_RECHECKS = 3
 
 # Pointer positions measured with `cliclick p`.
 TRADE_OFFER = (1308, 578)
-CONFIRM_BUTTON = (1315, 850)
+CONFIRM_BUTTON = (1315, 887)
 
 # When the connection has timed out, the Steam app shows a retry button here.
 # It is clicked once at the start of every run, before anything else, and is
@@ -327,7 +327,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="print the actions without clicking anything")
     parser.add_argument("--no-focus-check", action="store_true", help="do not require iPhone Mirroring to be the front app")
     parser.add_argument("--countdown", type=int, default=3, help="seconds to wait before the first action (default 3)")
-    parser.add_argument("--jitter", type=int, default=5, help="random pixel offset applied to every click (default 5)")
+    parser.add_argument("--jitter", type=int, default=1, help="random pixel offset applied to every click (default 5)")
     parser.add_argument("--refresh-mode", choices=["wheel", "replay", "taps", "scroll", "drag", "none"], default="wheel",
                         help="how to refresh the list first: mouse-wheel scroll (default), replay a recorded "
                              "trackpad gesture, configured taps, synthetic trackpad scroll, mouse drag, or none")
